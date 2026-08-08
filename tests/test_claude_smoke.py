@@ -381,3 +381,49 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
         )
 
     assert result.response.speech["plain"]["speech"] == "Done"
+
+
+def test_result_classification_network_beats_auth_wording() -> None:
+    """Offline errors phrased in auth terms must stay retryable, not fatal."""
+    from custom_components.claude.agent import (
+        ClaudeAgentError,
+        CredentialsInvalidError,
+        _raise_for_result,
+    )
+
+    for message in (
+        "unable to refresh authentication token: fetch failed",
+        "401 from proxy :: getaddrinfo ENOTFOUND api.anthropic.com",
+        "authentication check timed out",
+    ):
+        with pytest.raises(ClaudeAgentError) as excinfo:
+            _raise_for_result(message)
+        assert not isinstance(excinfo.value, CredentialsInvalidError), message
+
+    with pytest.raises(CredentialsInvalidError):
+        _raise_for_result("401 invalid bearer token")
+
+
+class TestVerifyReal:
+    """Tests that need the real async_verify/async_prepare, not the mocks."""
+
+    @pytest.fixture(autouse=True)
+    def mock_verify(self) -> Generator[None]:
+        """Keep the real async_verify."""
+        yield
+
+    @pytest.fixture(autouse=True)
+    def mock_prepare(self) -> Generator[None]:
+        """Keep the real async_prepare."""
+        yield
+
+    async def test_verify_wraps_prepare_failure(self) -> None:
+        """A raw network error during CLI preparation becomes ClaudeAgentError."""
+        from custom_components.claude.agent import ClaudeAgent, ClaudeAgentError
+
+        agent = ClaudeAgent.__new__(ClaudeAgent)
+        with patch.object(
+            ClaudeAgent, "async_prepare", AsyncMock(side_effect=OSError("boom"))
+        ):
+            with pytest.raises(ClaudeAgentError, match="OSError: boom"):
+                await agent.async_verify()

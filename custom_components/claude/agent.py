@@ -206,7 +206,16 @@ class ClaudeAgent:
 
         Raises CredentialsInvalidError / ClaudeAgentError on failure.
         """
-        await self.async_prepare()
+        try:
+            await self.async_prepare()
+        except ClaudeAgentError:
+            raise
+        except Exception as err:  # noqa: BLE001
+            # Preparation is dominated by the CLI download — a raw network
+            # error here must stay a retryable ClaudeAgentError, not escape
+            # as an unexpected exception (which ends as a permanent
+            # setup_error when this runs during config entry setup).
+            raise ClaudeAgentError(f"{type(err).__name__}: {err}") from err
         # Capture the CLI's stderr so a spawn/auth failure gives a real reason
         # instead of a bare exit code.
         stderr_lines: list[str] = []
@@ -257,8 +266,37 @@ def _error(message: str) -> dict[str, Any]:
 
 
 def _raise_for_result(message: str) -> None:
-    """Classify a failing result message into an auth vs generic error."""
+    """Classify a failing result message into an auth vs generic error.
+
+    Network trouble wins over auth wording: an offline CLI frequently phrases
+    its failure in auth terms ("unable to refresh authentication token", 401s
+    from a captive portal, …). Classifying those as bad credentials turns a
+    transient outage into ConfigEntryAuthFailed → setup_error, which never
+    retries — the entry then stays dead long after the network heals. A
+    generic ClaudeAgentError instead becomes ConfigEntryNotReady on the first
+    refresh, and Home Assistant keeps retrying until connectivity is back.
+    """
     lowered = message.lower()
+    if any(
+        token in lowered
+        for token in (
+            "getaddrinfo",
+            "enotfound",
+            "econnrefused",
+            "econnreset",
+            "etimedout",
+            "enetunreach",
+            "ehostunreach",
+            "fetch failed",
+            "network",
+            "dns",
+            "timed out",
+            "timeout",
+            "connection error",
+            "connect error",
+        )
+    ):
+        raise ClaudeAgentError(message)
     if any(
         token in lowered
         for token in ("401", "invalid bearer", "authentication", "unauthorized", "credit")
