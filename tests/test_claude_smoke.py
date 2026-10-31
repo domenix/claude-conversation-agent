@@ -355,6 +355,8 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
     from homeassistant.components import conversation
     from homeassistant.helpers import llm
 
+    from custom_components.claude.agent import ClaudeAgent
+
     entry = _entry(
         conversation_data={
             "recommended": True,
@@ -371,7 +373,15 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
         *_text_deltas("Done"),
         ResultMessage(session_id="sess-2"),
     ]
-    with patch("custom_components.claude.entity.query", _fake_query(messages)):
+    with (
+        patch("custom_components.claude.entity.query", _fake_query(messages)),
+        patch.object(
+            ClaudeAgent,
+            "build_tool_server",
+            autospec=True,
+            side_effect=ClaudeAgent.build_tool_server,
+        ) as build_tool_server,
+    ):
         result = await conversation.async_converse(
             hass,
             "what's up",
@@ -381,6 +391,34 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
         )
 
     assert result.response.speech["plain"]["speech"] == "Done"
+    # Every HA tool must reach the SDK as a JSON Schema object, whichever schema
+    # library this Home Assistant version describes its tools with.
+    tools = build_tool_server.call_args.args[1]
+    assert tools
+    for tool in tools:
+        assert isinstance(tool["input_schema"], dict), tool["name"]
+        assert tool["input_schema"]["type"] == "object", tool["name"]
+
+
+def test_structured_output_schema_is_json_schema() -> None:
+    """An AI Task structure converts to a JSON Schema object."""
+    import voluptuous as vol
+
+    from homeassistant.helpers import llm, selector
+
+    from custom_components.claude.entity import _to_json_schema
+
+    structure = vol.Schema(
+        {
+            vol.Required("answer"): selector.TextSelector(),
+            vol.Optional("count"): selector.NumberSelector(),
+        }
+    )
+    schema = _to_json_schema(structure, llm.selector_serializer)
+
+    assert schema["type"] == "object"
+    assert set(schema["properties"]) == {"answer", "count"}
+    assert schema["required"] == ["answer"]
 
 
 def test_result_classification_network_beats_auth_wording() -> None:

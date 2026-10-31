@@ -15,9 +15,15 @@ Python, the resolver silently walks back to an ancient
 so the tests quietly run against a version you don't ship on.
 
 Home Assistant pulls extra requirements for the platforms under test
-(`conversation` needs `hassil` and `home-assistant-intents`, `ai_task` needs
-`PyTurboJPEG`). Install them at the versions pinned in the installed Home
-Assistant's `homeassistant/package_constraints.txt`.
+(`conversation` needs `hassil` and `home-assistant-intents`, plus
+`gazetteer-matcher` since 2026.10; `ai_task` needs `PyTurboJPEG`). Install them
+at the versions pinned in the installed Home Assistant's
+`homeassistant/package_constraints.txt`.
+
+Tool and structured-output schemas go through `probatio` on Home Assistant
+2026.9+ and through `voluptuous-openapi` before that, so run the suite against
+both a current release and the oldest supported one (`hacs.json`) after
+touching schema handling.
 
 `conftest.py` maps the `tests.*` helper imports onto
 `pytest_homeassistant_custom_component`, so the same test file also runs

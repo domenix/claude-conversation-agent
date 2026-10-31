@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
-from voluptuous_openapi import convert
+
+# Home Assistant before 2026.9 converts schemas with voluptuous-openapi.
+try:
+    from probatio import to_openapi as _probatio_to_openapi
+except ImportError:
+    _probatio_to_openapi = None
+    from voluptuous_openapi import convert as _voluptuous_convert
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigSubentry
@@ -42,12 +48,28 @@ from .const import (
 from .coordinator import ClaudeCodeConfigEntry, ClaudeCodeCoordinator
 
 
+def _to_json_schema(
+    schema: Any, custom_serializer: Callable[[Any], Any] | None
+) -> dict[str, Any]:
+    """Convert an HA schema (tool parameters, AI Task structure) to JSON Schema.
+
+    Home Assistant 2026.9 replaced voluptuous-openapi with probatio, and 2026.10
+    describes LLM tools as probatio schemas, which voluptuous-openapi's convert()
+    turns into probatio's UNSUPPORTED marker instead of a dict.
+    """
+    if _probatio_to_openapi is not None:
+        return _probatio_to_openapi(
+            schema, custom_serializer=custom_serializer, openapi_version="3.1.0"
+        )
+    return _voluptuous_convert(schema, custom_serializer=custom_serializer)
+
+
 def _format_tool(
     tool: llm.Tool, custom_serializer: Callable[[Any], Any] | None
 ) -> dict[str, Any]:
     """Format an HA LLM tool for the Agent SDK MCP server."""
     unsupported_keys = {"oneOf", "anyOf", "allOf"}
-    schema = convert(tool.parameters, custom_serializer=custom_serializer)
+    schema = _to_json_schema(tool.parameters, custom_serializer)
     schema = {k: v for k, v in schema.items() if k not in unsupported_keys}
     return {
         "name": tool.name,
@@ -398,9 +420,9 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
         effort = options[CONF_THINKING_EFFORT]
         structure_dict = None
         if structure:
-            structure_dict = convert(
+            structure_dict = _to_json_schema(
                 structure,
-                custom_serializer=chat_log.llm_api.custom_serializer
+                chat_log.llm_api.custom_serializer
                 if chat_log.llm_api
                 else llm.selector_serializer,
             )
