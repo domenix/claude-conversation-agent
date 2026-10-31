@@ -389,7 +389,13 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                 CONF_CHAT_MODEL,
                 default=DEFAULT[CONF_CHAT_MODEL],
             ): SelectSelector(
-                SelectSelectorConfig(options=self._get_model_list(), custom_value=True)
+                SelectSelectorConfig(
+                    # Fetch when the form opens, not again on submit.
+                    options=await self._async_get_model_list(
+                        refresh=user_input is None
+                    ),
+                    custom_value=True,
+                )
             ),
             vol.Optional(
                 CONF_MAX_TOKENS,
@@ -472,10 +478,13 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
             last_step=True,
         )
 
-    def _get_model_list(self) -> list[SelectOptionDict]:
-        """Get the list of models offered by the integration."""
+    async def _async_get_model_list(self, refresh: bool) -> list[SelectOptionDict]:
+        """Get the models to offer, re-fetched from Anthropic if ``refresh``."""
         coordinator = self._get_entry().runtime_data
+        models = (
+            await coordinator.async_refresh_models() if refresh else coordinator.data
+        )
         return [
             SelectOptionDict(label=model.display_name, value=model.id)
-            for model in coordinator.data or []
+            for model in models or []
         ]

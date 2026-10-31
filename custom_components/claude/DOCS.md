@@ -54,7 +54,7 @@ web fetch, code execution), from the integration's subentries.
 
 | Option | Description |
 |---|---|
-| Model | Model for responses. "Account default" uses your Claude default. |
+| Model | Model for responses, listed live from Anthropic (re-fetched each time the options open; a built-in list if that fails). "Account default" uses your Claude default; any other model ID can be typed in. |
 | Maximum tokens | Cap on response tokens per turn. |
 | Thinking budget | Extended-thinking token budget (0 = model decides). |
 | Thinking effort | Effort level (default/low/medium/high/xhigh/max). |
@@ -70,7 +70,7 @@ changed via **Reconfigure** or the reauth prompt.
 | Anthropic integration | Claude |
 |---|---|
 | API key | Claude subscription (OAuth token) or API key |
-| Model selection | Same (aliases + custom value) |
+| Model selection | Same (fetched from Anthropic + custom value) |
 | Assist / LLM API tools | Same (executed in-process) |
 | Streaming responses | Same |
 | Extended thinking budget / effort | Same (`thinking`, `effort`) |

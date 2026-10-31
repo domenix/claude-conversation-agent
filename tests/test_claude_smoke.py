@@ -10,9 +10,10 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
+import aiohttp
 import pytest
 
-from homeassistant.config_entries import ConfigSubentryData
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -138,6 +139,23 @@ def mock_prewarm() -> Generator[None]:
         yield
 
 
+MODELS_URL = "https://api.anthropic.com/v1/models"
+API_MODELS = [
+    {"id": "claude-new-9", "display_name": "Claude New 9"},
+    {"id": "claude-old-8", "display_name": "Claude Old 8"},
+]
+
+
+@pytest.fixture(autouse=True)
+def mock_models_api(aioclient_mock: AiohttpClientMocker) -> AiohttpClientMocker:
+    """Answer Anthropic's model list for every test (no real network)."""
+    aioclient_mock.get(
+        MODELS_URL,
+        json={"data": API_MODELS, "has_more": False, "last_id": "claude-old-8"},
+    )
+    return aioclient_mock
+
+
 def _entry(
     conversation_data: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
@@ -177,6 +195,142 @@ async def test_setup_creates_entities(hass: HomeAssistant) -> None:
 
     assert hass.states.get("conversation.claude_conversation") is not None
     assert hass.states.get("ai_task.claude_ai_task") is not None
+
+
+def _model_ids(models: list[Any]) -> list[str]:
+    return [model.id for model in models]
+
+
+async def test_models_fetched_at_setup(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """Setup offers "Account default" plus Anthropic's list, OAuth as Bearer."""
+    entry = _entry()
+    await _setup(hass, entry)
+
+    assert _model_ids(entry.runtime_data.data) == [
+        "default",
+        "claude-new-9",
+        "claude-old-8",
+    ]
+    assert entry.runtime_data.data[1].display_name == "Claude New 9"
+    _, url, _, headers = mock_models_api.mock_calls[-1]
+    assert url.query["limit"] == "1000"
+    assert headers["Authorization"] == f"Bearer {entry.data['oauth_token']}"
+    assert headers["anthropic-version"] == "2023-06-01"
+    assert "x-api-key" not in headers
+
+
+async def test_models_fetched_with_api_key(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """An API key is sent as x-api-key."""
+    entry = _entry(data={"api_key": "sk-ant-api-test"})
+    await _setup(hass, entry)
+
+    _, _, _, headers = mock_models_api.mock_calls[-1]
+    assert headers["x-api-key"] == "sk-ant-api-test"
+    assert "Authorization" not in headers
+
+
+async def test_models_follow_pagination(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """Pages are followed with after_id until has_more is false."""
+    mock_models_api.clear_requests()
+    # First registered match wins, so the more specific page goes first.
+    mock_models_api.get(
+        f"{MODELS_URL}?after_id=claude-old-8",
+        json={
+            "data": [{"id": "claude-ancient-1", "display_name": "Claude Ancient 1"}],
+            "has_more": False,
+            "last_id": "claude-ancient-1",
+        },
+    )
+    mock_models_api.get(
+        MODELS_URL,
+        json={"data": API_MODELS, "has_more": True, "last_id": "claude-old-8"},
+    )
+    entry = _entry()
+    await _setup(hass, entry)
+
+    assert _model_ids(entry.runtime_data.data) == [
+        "default",
+        "claude-new-9",
+        "claude-old-8",
+        "claude-ancient-1",
+    ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"status": 500},
+        {"exc": aiohttp.ClientError("offline")},
+        {"exc": TimeoutError()},
+        {"json": {"unexpected": True}},
+        {"json": {"data": [], "has_more": False}},
+    ],
+    ids=["http-error", "network-error", "timeout", "bad-shape", "empty"],
+)
+async def test_models_fall_back_to_builtin_list(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker, response: dict[str, Any]
+) -> None:
+    """A failed fetch never fails setup; the built-in list is offered instead."""
+    from custom_components.claude.const import MODELS
+
+    mock_models_api.clear_requests()
+    mock_models_api.get(MODELS_URL, **response)
+    entry = _entry()
+    await _setup(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.data == MODELS
+
+
+async def test_model_options_refetch_and_keep_list_on_failure(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """Opening the model options re-fetches; a failed re-fetch keeps the list."""
+    entry = _entry(conversation_data={"recommended": False})
+    await _setup(hass, entry)
+    subentry_id = next(
+        sid
+        for sid, sub in entry.subentries.items()
+        if sub.subentry_type == "conversation"
+    )
+
+    async def open_model_step() -> list[str]:
+        result = await hass.config_entries.subentries.async_init(
+            (entry.entry_id, "conversation"),
+            context={"source": "reconfigure", "subentry_id": subentry_id},
+        )
+        result = await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {"recommended": False}
+        )
+        assert result["step_id"] == "model"
+        selector = next(
+            value
+            for key, value in result["data_schema"].schema.items()
+            if key == "chat_model"
+        )
+        return [option["value"] for option in selector.config["options"]]
+
+    mock_models_api.clear_requests()
+    mock_models_api.get(
+        MODELS_URL,
+        json={
+            "data": [{"id": "claude-newest-10", "display_name": "Claude Newest 10"}],
+            "has_more": False,
+            "last_id": "claude-newest-10",
+        },
+    )
+    assert await open_model_step() == ["default", "claude-newest-10"]
+    assert mock_models_api.call_count == 1
+
+    mock_models_api.clear_requests()
+    mock_models_api.get(MODELS_URL, status=503)
+    assert await open_model_step() == ["default", "claude-newest-10"]
 
 
 async def test_config_flow_user(hass: HomeAssistant) -> None:

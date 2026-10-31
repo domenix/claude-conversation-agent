@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import override
 
+import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -24,6 +25,7 @@ from .const import (
     ISSUE_TOKEN_EXPIRED,
     ISSUE_TOKEN_EXPIRING,
     LOGGER,
+    MODEL_DEFAULT,
     MODELS,
     TOKEN_EXPIRY_CHECK_INTERVAL,
     TOKEN_EXPIRY_WARNING,
@@ -36,8 +38,9 @@ type ClaudeCodeConfigEntry = ConfigEntry[ClaudeCodeCoordinator]
 class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
     """Owns the in-process agent, the session map and credential state.
 
-    No polling: credentials are verified once at setup; the model list is
-    static. ``update_interval`` is left unset so nothing runs on a timer.
+    No polling: credentials are verified and the model list fetched once at
+    setup (the list again whenever the model options are opened).
+    ``update_interval`` is left unset so nothing runs on a timer.
     """
 
     config_entry: ClaudeCodeConfigEntry
@@ -133,7 +136,7 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
         return f"{issue}_{self.config_entry.entry_id}"
 
     async def async_update_data(self) -> list[Model]:
-        """Verify credentials once; return the static model list."""
+        """Verify credentials once; return the available models."""
         if not self.agent.authenticated:
             raise ConfigEntryAuthFailed(
                 translation_domain="claude",
@@ -153,7 +156,25 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
                 translation_placeholders={"message": str(err)},
             ) from err
         self.async_check_token_expiry()
-        return list(MODELS)
+        return await self._async_fetch_models() or list(MODELS)
+
+    async def async_refresh_models(self) -> list[Model]:
+        """Re-fetch the model list, keeping the current one if that fails."""
+        if models := await self._async_fetch_models():
+            self.async_set_updated_data(models)
+        return self.data or list(MODELS)
+
+    async def _async_fetch_models(self) -> list[Model] | None:
+        """Return "Account default" plus the API's models, or None on failure."""
+        try:
+            fetched = await self.agent.async_list_models()
+        except (aiohttp.ClientError, TimeoutError, KeyError, TypeError) as err:
+            LOGGER.warning("Could not fetch the Claude model list: %r", err)
+            return None
+        if not fetched:
+            LOGGER.warning("The Claude model list came back empty")
+            return None
+        return [MODEL_DEFAULT, *fetched]
 
     @callback
     def async_set_auth_failed(self) -> None:

@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     SdkMcpTool,
@@ -24,14 +25,20 @@ from claude_agent_sdk.types import McpSdkServerConfig
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.json import json_dumps
 
 from .cli import CliError, async_ensure_cli
 from .const import (
+    ANTHROPIC_VERSION,
     HA_SERVER_NAME,
     HOME_SUBDIR,
     LOGGER,
+    MODELS_FETCH_TIMEOUT_S,
+    MODELS_PAGE_LIMIT,
+    MODELS_URL,
     WORKSPACE_SUBDIR,
+    Model,
 )
 
 # Re-exported so callers stream messages without importing the SDK directly.
@@ -67,6 +74,35 @@ class ClaudeAgent:
     def authenticated(self) -> bool:
         """Return whether any credential is configured."""
         return bool(self._oauth_token or self._api_key)
+
+    async def async_list_models(self) -> list[Model]:
+        """Fetch the models these credentials can use, newest first.
+
+        Raises ``aiohttp.ClientError`` / ``TimeoutError`` on network or HTTP
+        errors and ``KeyError`` / ``TypeError`` on an unexpected response.
+        """
+        headers = {"anthropic-version": ANTHROPIC_VERSION}
+        if self._oauth_token:
+            headers["Authorization"] = f"Bearer {self._oauth_token}"
+        else:
+            headers["x-api-key"] = self._api_key
+        session = async_get_clientsession(self._hass)
+        timeout = aiohttp.ClientTimeout(total=MODELS_FETCH_TIMEOUT_S)
+        params = {"limit": str(MODELS_PAGE_LIMIT)}
+        models: list[Model] = []
+        while True:
+            async with session.get(
+                MODELS_URL, headers=headers, params=params, timeout=timeout
+            ) as response:
+                response.raise_for_status()
+                page = await response.json()
+            models.extend(
+                Model(item["id"], item.get("display_name") or item["id"])
+                for item in page["data"]
+            )
+            if not page.get("has_more") or not page.get("last_id"):
+                return models
+            params["after_id"] = page["last_id"]
 
     async def async_prepare(self) -> None:
         """Create the CLI home/workspace dirs and provision the CLI binary."""

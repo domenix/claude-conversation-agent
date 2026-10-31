@@ -88,8 +88,17 @@ class Model:
     display_name: str
 
 
+# Anthropic's model list; works with both an API key and a subscription token.
+MODELS_URL = "https://api.anthropic.com/v1/models"
+ANTHROPIC_VERSION = "2023-06-01"
+MODELS_PAGE_LIMIT = 1000
+MODELS_FETCH_TIMEOUT_S = 10
+
+MODEL_DEFAULT = Model("default", "Account default")
+
+# Offered only when the model list can't be fetched (offline, API error).
 MODELS = [
-    Model("default", "Account default"),
+    MODEL_DEFAULT,
     Model("claude-opus-4-8", "Claude Opus 4.8"),
     Model("claude-opus-4-7", "Claude Opus 4.7"),
     Model("claude-sonnet-5", "Claude Sonnet 5"),
