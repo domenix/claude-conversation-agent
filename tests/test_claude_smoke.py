@@ -619,3 +619,16 @@ class TestVerifyReal:
         ):
             with pytest.raises(ClaudeAgentError, match="OSError: boom"):
                 await agent.async_verify()
+
+
+async def test_brand_images_shipped(hass: HomeAssistant) -> None:
+    """HA 2026.3+ serves a custom integration's brand/ folder as its icon."""
+    from pathlib import Path
+
+    from homeassistant.loader import async_get_integration
+
+    integration = await async_get_integration(hass, DOMAIN)
+    assert integration.has_branding
+    brand = Path(integration.file_path) / "brand"
+    for name in ("icon.png", "icon@2x.png", "dark_icon.png", "logo.png"):
+        assert (brand / name).read_bytes().startswith(b"\x89PNG"), name

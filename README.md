@@ -35,3 +35,10 @@ Full setup, feature mapping and limitations:
 ## Development
 
 Tests run inside a home-assistant/core checkout — see [`tests/README.md`](./tests/README.md).
+
+## Credits
+
+This integration mirrors the capabilities of the stock
+[Anthropic integration](https://www.home-assistant.io/integrations/anthropic/),
+created and maintained by
+[Denis Shulyaka](https://github.com/Shulyaka).
