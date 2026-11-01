@@ -200,6 +200,7 @@ class ClaudeAgent:
         system_prompt: str,
         builtin_tools: list[str],
         tool_server: McpSdkServerConfig | None,
+        thinking_type: str,
         thinking_budget: int,
         effort: str | None,
         max_output_tokens: int | None,
@@ -230,8 +231,17 @@ class ClaudeAgent:
             strict_mcp_config=True,
             stderr=stderr,
         )
-        if thinking_budget:
-            options.thinking = {"type": "enabled", "budget_tokens": thinking_budget}
+        match thinking_type:
+            case "adaptive":
+                options.thinking = {"type": "adaptive", "display": "summarized"}
+            case "enabled":
+                options.thinking = {
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget,
+                    "display": "summarized",
+                }
+            case "disabled":
+                options.thinking = {"type": "disabled"}
         if effort:
             options.effort = effort
         if structure:

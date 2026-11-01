@@ -22,11 +22,12 @@ from .const import (
     CODE_TOOLS,
     CONF_CHAT_MODEL,
     CONF_CODE_EXECUTION,
+    CONF_EFFORT,
     CONF_MAX_TOKENS,
     CONF_RUN_TIMEOUT,
     CONF_SHOW_ACTIVITY,
     CONF_THINKING_BUDGET,
-    CONF_THINKING_EFFORT,
+    CONF_THINKING_TYPE,
     CONF_WEB_FETCH,
     CONF_WEB_SEARCH,
     CONF_WEB_SEARCH_USER_LOCATION,
@@ -438,7 +439,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
         req_model = self.subentry.data.get(CONF_CHAT_MODEL, DEFAULT[CONF_CHAT_MODEL])
         model = req_model if req_model and req_model != "default" else None
 
-        effort = options[CONF_THINKING_EFFORT]
+        effort = options[CONF_EFFORT]
         structure_dict = None
         if structure:
             structure_dict = _to_json_schema(
@@ -458,6 +459,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
             system_prompt=self._build_system_prompt(chat_log, session_id),
             builtin_tools=self._builtin_tools(),
             tool_server=tool_server,
+            thinking_type=options[CONF_THINKING_TYPE],
             thinking_budget=options[CONF_THINKING_BUDGET],
             effort=effort if effort != "default" else None,
             max_output_tokens=options[CONF_MAX_TOKENS] or None,

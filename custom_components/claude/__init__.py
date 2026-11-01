@@ -12,7 +12,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .cli import async_prewarm_cli
-from .const import DOMAIN
+from .const import CONF_EFFORT, CONF_THINKING_BUDGET, CONF_THINKING_TYPE, DOMAIN
 from .coordinator import ClaudeCodeConfigEntry, ClaudeCodeCoordinator
 
 PLATFORMS = (Platform.AI_TASK, Platform.CONVERSATION)
@@ -36,6 +36,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ClaudeCodeConfigEntry) -
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_update_options))
+
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ClaudeCodeConfigEntry) -> bool:
+    """Migrate an old config entry."""
+    if entry.version > 1:
+        return False
+
+    if entry.minor_version < 2:
+        # Effort and thinking were one pair of settings, where a budget of zero
+        # meant the model decides.
+        for subentry in entry.subentries.values():
+            data = dict(subentry.data)
+            if "thinking_effort" in data:
+                data[CONF_EFFORT] = data.pop("thinking_effort")
+            if data.get(CONF_THINKING_BUDGET):
+                data[CONF_THINKING_TYPE] = "enabled"
+            else:
+                data.pop(CONF_THINKING_BUDGET, None)
+            hass.config_entries.async_update_subentry(entry, subentry, data=data)
+        hass.config_entries.async_update_entry(entry, minor_version=2)
 
     return True
 

@@ -90,8 +90,9 @@
             "chat_model": "Model",
             "code_execution": "Code execution",
             "max_tokens": "Maximum tokens to return in response",
+            "effort": "Effort",
             "thinking_budget": "Thinking budget",
-            "thinking_effort": "Thinking effort",
+            "thinking_type": "Thinking type",
             "user_location": "Include home location",
             "web_fetch": "Enable web fetch",
             "web_search": "Enable web search",
@@ -102,8 +103,9 @@
             "chat_model": "The model to serve the responses. 'Account default' uses your Claude default model.",
             "code_execution": "Allow the model to run shell commands and read/write files in a scratch workspace inside the Home Assistant process.",
             "max_tokens": "Limit the number of response tokens per model turn.",
-            "thinking_budget": "The number of tokens the model can use to think about the response. Set to 1024 or greater to enable extended thinking; 0 lets the model decide.",
-            "thinking_effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
+            "effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
+            "thinking_budget": "Tokens available for thinking when the thinking type is 'Enabled'. Must be less than the maximum tokens.",
+            "thinking_type": "Controls when Claude spends additional tokens reasoning through a request. 'Default' lets Claude decide.",
             "user_location": "Localize search results based on home location",
             "web_fetch": "Allow Claude to retrieve full content from web pages to augment its context with live web content.",
             "web_search": "Give Claude direct access to real-time web content, allowing it to answer questions with up-to-date information beyond its knowledge cutoff.",
@@ -148,8 +150,9 @@
             "chat_model": "Model",
             "code_execution": "Code execution",
             "max_tokens": "Maximum tokens to return in response",
+            "effort": "Effort",
             "thinking_budget": "Thinking budget",
-            "thinking_effort": "Thinking effort",
+            "thinking_type": "Thinking type",
             "user_location": "Include home location",
             "web_fetch": "Enable web fetch",
             "web_search": "Enable web search",
@@ -160,8 +163,9 @@
             "chat_model": "The model to serve the responses. 'Account default' uses your Claude default model.",
             "code_execution": "Allow the model to run shell commands and read/write files in a scratch workspace inside the Home Assistant process.",
             "max_tokens": "Limit the number of response tokens per model turn.",
-            "thinking_budget": "The number of tokens the model can use to think about the response. Set to 1024 or greater to enable extended thinking; 0 lets the model decide.",
-            "thinking_effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
+            "effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
+            "thinking_budget": "Tokens available for thinking when the thinking type is 'Enabled'. Must be less than the maximum tokens.",
+            "thinking_type": "Controls when Claude spends additional tokens reasoning through a request. 'Default' lets Claude decide.",
             "user_location": "Localize search results based on home location",
             "web_fetch": "Allow Claude to retrieve full content from web pages to augment its context with live web content.",
             "web_search": "Give Claude direct access to real-time web content, allowing it to answer questions with up-to-date information beyond its knowledge cutoff.",
@@ -223,7 +227,7 @@
     }
   },
   "selector": {
-    "thinking_effort": {
+    "effort": {
       "options": {
         "default": "Default",
         "high": "High",
@@ -231,6 +235,14 @@
         "max": "Max",
         "medium": "Medium",
         "xhigh": "X-High"
+      }
+    },
+    "thinking_type": {
+      "options": {
+        "adaptive": "Adaptive",
+        "default": "Default",
+        "disabled": "Disabled",
+        "enabled": "Enabled"
       }
     }
   }

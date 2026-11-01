@@ -740,6 +740,107 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.parametrize(
+    ("options", "thinking", "effort"),
+    [
+        ({"recommended": True}, None, None),
+        ({"recommended": False, "effort": "high"}, None, "high"),
+        (
+            {"recommended": False, "thinking_type": "adaptive"},
+            {"type": "adaptive", "display": "summarized"},
+            None,
+        ),
+        (
+            {"recommended": False, "thinking_type": "enabled", "thinking_budget": 2048},
+            {"type": "enabled", "budget_tokens": 2048, "display": "summarized"},
+            None,
+        ),
+        ({"recommended": False, "thinking_type": "disabled"}, {"type": "disabled"}, None),
+    ],
+    ids=["recommended", "effort", "adaptive", "enabled", "disabled"],
+)
+async def test_thinking_and_effort_reach_the_sdk(
+    hass: HomeAssistant,
+    options: dict[str, Any],
+    thinking: dict[str, Any] | None,
+    effort: str | None,
+) -> None:
+    """Thinking type and effort are separate settings."""
+    from homeassistant.components import conversation
+
+    await _setup(hass, _entry(conversation_data=options))
+
+    seen: list[Any] = []
+    with patch(
+        "custom_components.claude.entity.query",
+        _fake_query([*_text_deltas("Hi"), ResultMessage()], seen),
+    ):
+        await conversation.async_converse(
+            hass, "hello", None, None, agent_id="conversation.claude_conversation"
+        )
+
+    assert seen[0].thinking == thinking
+    assert seen[0].effort == effort
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            {"thinking_budget": 2048, "thinking_effort": "high"},
+            {"thinking_type": "enabled", "thinking_budget": 2048, "effort": "high"},
+        ),
+        ({"thinking_budget": 0, "thinking_effort": "default"}, {"effort": "default"}),
+        ({"recommended": True}, {"recommended": True}),
+    ],
+    ids=["budget-and-effort", "model-decides", "recommended"],
+)
+async def test_thinking_options_migrate(
+    hass: HomeAssistant, old: dict[str, Any], new: dict[str, Any]
+) -> None:
+    """Saved agents move to the separate settings and keep their behavior."""
+    entry = _entry(conversation_data=old)
+    await _setup(hass, entry)
+
+    assert entry.minor_version == 2
+    subentry = next(
+        sub for sub in entry.subentries.values() if sub.subentry_type == "conversation"
+    )
+    assert dict(subentry.data) == new
+    assert entry.state is ConfigEntryState.LOADED
+
+
+@pytest.mark.parametrize(
+    ("thinking_type", "errors"),
+    [
+        ("enabled", {"thinking_budget": "thinking_budget_too_large"}),
+        ("adaptive", None),
+    ],
+)
+async def test_thinking_budget_only_checked_when_it_applies(
+    hass: HomeAssistant, thinking_type: str, errors: dict[str, str] | None
+) -> None:
+    """A budget over the token limit only matters when manual thinking is on."""
+    entry = _entry(conversation_data={"recommended": False})
+    await _setup(hass, entry)
+    subentry_id = next(
+        sid for sid, sub in entry.subentries.items() if sub.subentry_type == "conversation"
+    )
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "conversation"),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"recommended": False}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {"max_tokens": 2000, "thinking_type": thinking_type, "thinking_budget": 4000},
+    )
+
+    assert result.get("errors") == errors
+
+
+@pytest.mark.parametrize(
     ("options", "tools"),
     [
         ({"recommended": True}, []),

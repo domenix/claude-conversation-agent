@@ -31,20 +31,24 @@ CONF_RECOMMENDED = "recommended"
 CONF_CHAT_MODEL = "chat_model"
 CONF_CODE_EXECUTION = "code_execution"
 CONF_MAX_TOKENS = "max_tokens"
+CONF_EFFORT = "effort"
 CONF_THINKING_BUDGET = "thinking_budget"
-CONF_THINKING_EFFORT = "thinking_effort"
+CONF_THINKING_TYPE = "thinking_type"
 CONF_WEB_FETCH = "web_fetch"
 CONF_WEB_SEARCH = "web_search"
 CONF_WEB_SEARCH_USER_LOCATION = "user_location"
 CONF_RUN_TIMEOUT = "run_timeout"
 CONF_SHOW_ACTIVITY = "show_activity"
 
+MIN_THINKING_BUDGET = 1024
+
 DEFAULT = {
     CONF_CHAT_MODEL: "default",
     CONF_CODE_EXECUTION: False,
     CONF_MAX_TOKENS: 4096,
-    CONF_THINKING_BUDGET: 0,
-    CONF_THINKING_EFFORT: "default",
+    CONF_EFFORT: "default",
+    CONF_THINKING_BUDGET: MIN_THINKING_BUDGET,
+    CONF_THINKING_TYPE: "default",
     CONF_WEB_FETCH: False,
     CONF_WEB_SEARCH: False,
     CONF_WEB_SEARCH_USER_LOCATION: False,
@@ -52,7 +56,8 @@ DEFAULT = {
     CONF_SHOW_ACTIVITY: False,
 }
 
-THINKING_EFFORT_OPTIONS = ["default", "low", "medium", "high", "xhigh", "max"]
+EFFORT_OPTIONS = ["default", "low", "medium", "high", "xhigh", "max"]
+THINKING_TYPE_OPTIONS = ["default", "adaptive", "enabled", "disabled"]
 
 MAX_TURNS = 50
 

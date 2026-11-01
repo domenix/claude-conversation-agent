@@ -40,6 +40,7 @@ from .const import (
     CONF_API_KEY,
     CONF_CHAT_MODEL,
     CONF_CODE_EXECUTION,
+    CONF_EFFORT,
     CONF_MAX_TOKENS,
     CONF_OAUTH_EXPIRES_AT,
     CONF_OAUTH_TOKEN,
@@ -47,7 +48,7 @@ from .const import (
     CONF_RUN_TIMEOUT,
     CONF_SHOW_ACTIVITY,
     CONF_THINKING_BUDGET,
-    CONF_THINKING_EFFORT,
+    CONF_THINKING_TYPE,
     CONF_WEB_FETCH,
     CONF_WEB_SEARCH,
     CONF_WEB_SEARCH_USER_LOCATION,
@@ -55,7 +56,9 @@ from .const import (
     DEFAULT_AI_TASK_NAME,
     DEFAULT_CONVERSATION_NAME,
     DOMAIN,
-    THINKING_EFFORT_OPTIONS,
+    EFFORT_OPTIONS,
+    MIN_THINKING_BUDGET,
+    THINKING_TYPE_OPTIONS,
 )
 from .coordinator import ClaudeCodeConfigEntry
 
@@ -131,6 +134,7 @@ class ClaudeCodeConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Claude."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     _oauth_url: str = ""
     _oauth_verifier: str = ""
@@ -400,19 +404,31 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                 default=DEFAULT[CONF_MAX_TOKENS],
             ): cv.positive_int,
             probatio.Optional(
+                CONF_THINKING_TYPE,
+                default=DEFAULT[CONF_THINKING_TYPE],
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=THINKING_TYPE_OPTIONS,
+                    translation_key=CONF_THINKING_TYPE,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            probatio.Optional(
                 CONF_THINKING_BUDGET,
                 default=DEFAULT[CONF_THINKING_BUDGET],
             ): probatio.All(
-                NumberSelector(NumberSelectorConfig(min=0, max=64000)),
+                NumberSelector(
+                    NumberSelectorConfig(min=MIN_THINKING_BUDGET, max=64000)
+                ),
                 probatio.Coerce(int),
             ),
             probatio.Optional(
-                CONF_THINKING_EFFORT,
-                default=DEFAULT[CONF_THINKING_EFFORT],
+                CONF_EFFORT,
+                default=DEFAULT[CONF_EFFORT],
             ): SelectSelector(
                 SelectSelectorConfig(
-                    options=THINKING_EFFORT_OPTIONS,
-                    translation_key=CONF_THINKING_EFFORT,
+                    options=EFFORT_OPTIONS,
+                    translation_key=CONF_EFFORT,
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
@@ -446,11 +462,9 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
         }
 
         if user_input is not None:
-            if (
-                user_input.get(CONF_THINKING_BUDGET, 0)
-                and user_input.get(CONF_THINKING_BUDGET, 0)
-                >= user_input.get(CONF_MAX_TOKENS, DEFAULT[CONF_MAX_TOKENS])
-            ):
+            if user_input.get(CONF_THINKING_TYPE) == "enabled" and user_input.get(
+                CONF_THINKING_BUDGET, DEFAULT[CONF_THINKING_BUDGET]
+            ) >= user_input.get(CONF_MAX_TOKENS, DEFAULT[CONF_MAX_TOKENS]):
                 errors[CONF_THINKING_BUDGET] = "thinking_budget_too_large"
 
             self.options.update(user_input)

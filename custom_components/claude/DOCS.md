@@ -55,8 +55,9 @@ web fetch, code execution), from the integration's subentries.
 |---|---|
 | Model | Model for responses, listed live from Anthropic (re-fetched each time the options open; a built-in list if that fails). "Account default" uses your Claude default; any other model ID can be typed in. |
 | Maximum tokens | Cap on response tokens per turn. |
-| Thinking budget | Extended-thinking token budget (0 = model decides). |
-| Thinking effort | Effort level (default/low/medium/high/xhigh/max). |
+| Thinking type | Default (Claude decides), adaptive, enabled or disabled. |
+| Thinking budget | Token budget for the "enabled" thinking type. |
+| Effort | Effort level (default/low/medium/high/xhigh/max). |
 | Code execution | Allow Bash / file tools in a scratch workspace inside HA. |
 | Web search / Web fetch | Enable Claude's WebSearch / WebFetch tools. |
 | Include home location | Localize web search to your home location. |
@@ -72,7 +73,7 @@ changed via **Reconfigure** or the reauth prompt.
 | Model selection | Same (fetched from Anthropic + custom value) |
 | Assist / LLM API tools | Same (executed in-process) |
 | Streaming responses | Same |
-| Extended thinking budget / effort | Same (`thinking`, `effort`) |
+| Thinking type / budget / effort | Same, plus "Default" to let Claude decide |
 | Web search / web fetch | Claude WebSearch / WebFetch tools |
 | Code execution | Claude Bash/file tools, in a scratch workspace |
 | Attachments (images, PDF) | Same |
