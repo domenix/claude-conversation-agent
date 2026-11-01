@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Prepare a release: set the version and the minimum Home Assistant, commit, tag.
+# Nothing leaves this machine until the tag is pushed, which is what publishes it.
+set -euo pipefail
+
+version=${1:?usage: script/release <version>, e.g. 1.1.0}
+cd "$(dirname "$0")/.."
+
+fail() {
+  echo "$1" >&2
+  exit 1
+}
+
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "not a version: $version"
+[[ $(git branch --show-current) == master ]] || fail "not on master"
+[[ -z $(git status --porcelain) ]] || fail "working tree not clean"
+git rev-parse -q --verify "refs/tags/v$version" >/dev/null && fail "v$version already exists"
+
+# The minimum is the Home Assistant release CI tests against.
+plugin=$(sed -n 's/.*HA_STABLE_PLUGIN_VERSION: "\(.*\)"/\1/p' .github/workflows/ci.yml)
+tested=$(curl -fsS "https://pypi.org/pypi/pytest-homeassistant-custom-component/$plugin/json" |
+  jq -r '.info.requires_dist[] | select(startswith("homeassistant==")) | ltrimstr("homeassistant==")')
+[[ -n $tested ]] || fail "no Home Assistant pin found for test plugin $plugin"
+minimum=$(cut -d. -f1,2 <<<"$tested").0
+
+set_json() {
+  local tmp
+  tmp=$(mktemp)
+  jq --arg value "$3" "$2 = \$value" "$1" >"$tmp"
+  cat "$tmp" >"$1"
+  rm "$tmp"
+}
+set_json custom_components/claude/manifest.json .version "$version"
+set_json hacs.json .homeassistant "$minimum"
+
+git add custom_components/claude/manifest.json hacs.json
+git commit -qm "chore: release $version"
+git tag "v$version"
+
+echo "v$version ready, minimum Home Assistant $minimum. To publish:"
+echo "  git push origin master v$version"

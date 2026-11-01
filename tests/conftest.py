@@ -6,8 +6,11 @@ running against this repository instead, point those names at the copies shipped
 in ``pytest_homeassistant_custom_component`` so the same file runs either way.
 """
 
+from collections.abc import Iterator
 import sys
 import types
+
+import pytest
 
 
 def _alias_core_test_helpers() -> None:
@@ -39,3 +42,21 @@ def pytest_configure(config: object) -> None:
 def pytest_sessionstart(session: object) -> None:
     """Import the integration so its package exposes it by attribute."""
     import custom_components.claude  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def fail_on_ha_usage_report(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
+    """Fail a test when Home Assistant reports this integration's use of its API.
+
+    For a custom integration, Home Assistant only logs a deprecated call until the
+    release that breaks it, so nothing else fails while there is still time to fix.
+    """
+    yield
+    reports = [
+        record.getMessage()
+        for when in ("setup", "call")
+        for record in caplog.get_records(when)
+        if record.name == "homeassistant.helpers.frame"
+        and "custom integration 'claude'" in record.getMessage()
+    ]
+    assert not reports

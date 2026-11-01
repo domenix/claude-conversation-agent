@@ -1,0 +1,23 @@
+# Mirrors the rules Home Assistant core lints its own integrations with, so a
+# new core migration shows up here too. When core bans something new, copy it
+# from [tool.ruff.lint.flake8-tidy-imports.banned-api] in its pyproject.toml.
+target-version = "py314"
+
+[lint]
+select = ["ICN", "TID251"]
+
+[lint.flake8-import-conventions.banned-aliases]
+"probatio" = ["vol"]
+
+[lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "It should not be needed because Home Assistant requires Python 3.14+"
+"async_timeout".msg = "use asyncio.timeout instead"
+"homeassistant.helpers.config_validation.ensure_list".msg = "use probatio.EnsureList() instead"
+"homeassistant.helpers.config_validation.has_at_least_one_key".msg = "use probatio.AtLeastOne instead"
+"homeassistant.helpers.config_validation.has_at_most_one_key".msg = "use probatio.AtMostOne instead"
+"homeassistant.helpers.config_validation.port".msg = "use probatio.Port() instead"
+"httpcore".msg = "use httpcore2 instead"
+"httpx".msg = "use httpx2 instead"
+"pytz".msg = "use zoneinfo instead"
+"voluptuous".msg = "use probatio instead"
+"voluptuous_openapi".msg = "use probatio.to_openapi instead"
