@@ -105,6 +105,8 @@ class SDKDeltaStream:
         self.result_error: str | None = None
         self.stop_reason: str | None = None
         self.structured_output: Any = None
+        self._message_id: str | None = None
+        self._usage: dict[str, Any] = {}
 
     def __aiter__(
         self,
@@ -154,26 +156,44 @@ class SDKDeltaStream:
                     self._need_role = False
                     yield {"role": "assistant"}
                 yield {"thinking_content": delta["thinking"]}
+        elif etype == "message_start":
+            message = event.get("message", {})
+            self._message_id = message.get("id")
+            self._usage = dict(message.get("usage") or {})
         elif etype == "message_delta":
-            usage = event.get("usage") or {}
-            if usage:
-                self._chat_log.async_trace(
-                    {
-                        "stats": {
-                            "input_tokens": usage.get("input_tokens", 0),
-                            "cached_input_tokens": usage.get(
-                                "cache_read_input_tokens", 0
-                            ),
-                            "output_tokens": usage.get("output_tokens", 0),
-                        }
-                    }
-                )
+            self._usage.update(event.get("usage") or {})
             if stop_reason := event.get("delta", {}).get("stop_reason"):
                 self.stop_reason = stop_reason
+            if self._usage:
+                token_stats = self._token_stats()
+                LOGGER.debug("Response usage: %s", token_stats)
+                self._chat_log.async_trace(token_stats)
             if stop_reason == "refusal":
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key="api_refusal"
                 )
+
+    def _token_stats(self) -> dict[str, Any]:
+        """Return token stats and the full usage for the conversation trace."""
+        uncached_input_tokens = self._usage.get("input_tokens", 0)
+        cache_creation_input_tokens = (
+            self._usage.get("cache_creation_input_tokens") or 0
+        )
+        cached_input_tokens = self._usage.get("cache_read_input_tokens") or 0
+        return {
+            "stats": {
+                "input_tokens": uncached_input_tokens
+                + cache_creation_input_tokens
+                + cached_input_tokens,
+                "uncached_input_tokens": uncached_input_tokens,
+                "cache_creation_input_tokens": cache_creation_input_tokens,
+                "cached_input_tokens": cached_input_tokens,
+                "output_tokens": self._usage.get("output_tokens", 0),
+                "stop_reason": self.stop_reason,
+            },
+            "usage": self._usage.copy(),
+            "message_id": self._message_id,
+        }
 
     async def _handle_assistant(
         self, message: Any

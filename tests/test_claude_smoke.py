@@ -6,6 +6,7 @@ invoked; ``async_verify`` and ``query`` are patched with fakes.
 
 from collections.abc import AsyncIterator, Generator
 from datetime import UTC, datetime, timedelta
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
@@ -688,6 +689,57 @@ async def test_refusal_raises() -> None:
         await _collect([*_text_deltas("Sorry"), _message_delta("refusal")])
 
     assert excinfo.value.translation_key == "api_refusal"
+
+
+async def test_usage_trace_counts_every_input_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The trace counts cache writes and reads, and keeps the full usage."""
+    from custom_components.claude.entity import SDKDeltaStream
+
+    caplog.set_level(logging.DEBUG, logger="custom_components.claude")
+    chat_log = MagicMock()
+    usage = {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 300,
+        "cache_read_input_tokens": 4000,
+        "output_tokens": 50,
+    }
+
+    async def _gen() -> AsyncIterator[Any]:
+        yield StreamEvent(
+            {
+                "type": "message_start",
+                "message": {"id": "msg_1", "usage": usage | {"output_tokens": 1}},
+            }
+        )
+        yield StreamEvent(
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 50},
+            }
+        )
+
+    async for _ in SDKDeltaStream(chat_log, _gen(), lambda _: None):
+        pass
+
+    chat_log.async_trace.assert_called_once_with(
+        {
+            "stats": {
+                "input_tokens": 4302,
+                "uncached_input_tokens": 2,
+                "cache_creation_input_tokens": 300,
+                "cached_input_tokens": 4000,
+                "output_tokens": 50,
+                "stop_reason": "end_turn",
+            },
+            "usage": usage,
+            "message_id": "msg_1",
+        }
+    )
+    assert "Response usage" in caplog.text
+    assert "'input_tokens': 4302" in caplog.text
 
 
 async def test_failed_run_closes_the_sdk_stream(hass: HomeAssistant) -> None:
