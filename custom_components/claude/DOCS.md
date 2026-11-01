@@ -1,9 +1,8 @@
 # Claude
 
-Run Home Assistant's conversation agent and AI Tasks on your **Claude
-subscription** instead of a pay-per-token Anthropic API key. The integration
-drives the Claude Agent SDK **in-process** (the SDK bundles the Claude Code CLI,
-`claude -p`) and mirrors the stock Anthropic integration feature-for-feature.
+Run Home Assistant's conversation agent and AI Tasks through the Claude Agent
+SDK. The integration runs the SDK in-process (the SDK drives the Claude Code CLI,
+`claude -p`) and offers features similar to the stock Anthropic integration.
 
 ## How it works
 
@@ -19,17 +18,17 @@ your Claude subscription
 - Home Assistant builds the prompt and exposes the selected LLM API tools (e.g.
   Assist) to the model as an in-process MCP server (`mcp__ha__*`).
 - The agent loop runs inside Home Assistant. When Claude calls an HA tool, the
-  integration executes it **directly** via the conversation's LLM API — no
-  round-trip, respecting your exposed entities exactly like the stock
-  integration. Tool calls and results are still recorded in the chat log.
-- Conversations map to Claude sessions (`resume`), so multi-turn context is
-  kept across turns; after a Home Assistant restart the prior transcript is
-  folded into the system prompt instead.
+  integration executes it directly via the conversation's LLM API, with no
+  round-trip. It respects your exposed entities exactly like the stock
+  integration. The chat log still records tool calls and results.
+- Conversations map to Claude sessions (`resume`), so context carries
+  across turns. After a Home Assistant restart, the integration folds the prior
+  transcript into the system prompt instead.
 
 ## Setup
 
 **Settings → Devices & services → Add integration → Claude.** The first time
-you submit credentials the integration downloads the Claude Code CLI matching
+you submit credentials, the integration downloads the Claude Code CLI matching
 your platform (~250 MB, cached under `/config`), so allow a few minutes. Then
 pick one of:
 
@@ -40,11 +39,11 @@ Assistant notifies you before the login expires, and again if it does.
 
 ### Enter a token or API key manually
 
-- **OAuth token** — from `claude setup-token` (the `sk-ant-oat01-...` value).
-- **API key** — an Anthropic API key, used only when no OAuth token is set.
+- **OAuth token:** from `claude setup-token` (the `sk-ant-oat01-...` value).
+- **API key:** an Anthropic API key, used only when no OAuth token is set.
 
-Credentials are verified with a minimal query before the entry is created. Change
-them later via the integration's **Reconfigure**.
+The integration verifies credentials with a minimal query before it creates the
+entry. To change them later, use **Reconfigure**.
 
 The integration creates a conversation agent (with Assist control enabled) and
 an AI Task entity. Add more, or reconfigure options (model, thinking, web search,
@@ -84,7 +83,7 @@ changed via **Reconfigure** or the reauth prompt.
 ## Known limitations
 
 - Latency is higher than the raw API: each turn spins the Claude agent
-  loop. Expect a few seconds; noticeable on voice.
+  loop. Expect a few seconds, which is noticeable on voice.
 - Headless runs consume the Agent SDK credit pool of your subscription; when
   exhausted, requests fail until it resets (or configure an API key).
 - The CLI is fetched for your platform (`linux-arm64`/`linux-x64`, glibc or
@@ -97,11 +96,11 @@ changed via **Reconfigure** or the reauth prompt.
 ## Troubleshooting
 
 - **"Claude has no valid credentials"** / **"401 Invalid authentication
-  credentials"** — the login expired or was revoked. Reconfigure the integration
+  credentials"**: the login expired or was revoked. Reconfigure the integration
   and log in again.
-- **Setup hangs on first install** — the `claude-agent-sdk` wheel is large; give
-  it time, and check Home Assistant has outbound internet for pip.
-- **Model errors** — leave the model on "Account default" or pick one your
+- **Setup hangs on first install:** the `claude-agent-sdk` wheel is large. Give
+  it time, and check that Home Assistant has outbound internet for pip.
+- **Model errors:** leave the model on "Account default" or pick one your
   subscription can access.
 - Set the `claude` logger to `debug` to see the full event flow and the
   CLI's stderr.

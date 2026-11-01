@@ -15,7 +15,7 @@
     "step": {
       "user": {
         "title": "Claude",
-        "description": "Run Home Assistant conversation agents and AI Tasks on your Claude subscription.",
+        "description": "Run Home Assistant conversation agents and AI tasks on your Claude subscription.",
         "menu_options": {
           "oauth": "Log in with Claude (recommended)",
           "manual": "Enter a token or API key manually"
