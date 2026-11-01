@@ -54,13 +54,17 @@ web fetch, code execution), from the integration's subentries.
 | Option | Description |
 |---|---|
 | Model | Model for responses, listed live from Anthropic (re-fetched each time the options open; a built-in list if that fails). "Account default" uses your Claude default; any other model ID can be typed in. |
-| Maximum tokens | Cap on response tokens per turn. |
+| Maximum tokens | Cap on response tokens per turn, up to the model's limit. |
 | Thinking type | Default (Claude decides), adaptive, enabled or disabled. |
 | Thinking budget | Token budget for the "enabled" thinking type. |
 | Effort | Effort level (default/low/medium/high/xhigh/max). |
 | Code execution | Allow Bash / file tools in a scratch workspace inside HA. |
 | Web search / Web fetch | Enable Claude's WebSearch / WebFetch tools. |
 | Include home location | Localize web search to your home location. |
+
+The options follow the model you pick: settings it doesn't support aren't offered,
+and a saved setting is moved to the nearest supported one at run time. With "Account
+default" or a model Anthropic can't describe, every option stays available.
 
 Credentials (OAuth token / API key) live on the integration entry itself and are
 changed via **Reconfigure** or the reauth prompt.

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
+from typing import Any
 
 DOMAIN = "claude"
 LOGGER = logging.getLogger(__package__)
@@ -108,6 +109,15 @@ class Model:
     # "active", "deprecated" or "retired"; None if the API didn't say.
     lifecycle: str | None = None
     retires_at: str | None = None
+    # None if the API didn't say, in which case every option stays available.
+    capabilities: dict[str, Any] | None = None
+    max_tokens: int | None = None
+
+
+def model_alias(model_id: str) -> str:
+    """Resolve the alias of a dated model ID."""
+    model, _, version = model_id.rpartition("-")
+    return model if len(version) == 8 and version.isdecimal() else model_id
 
 
 # Anthropic's model list; works with both an API key and a subscription token.

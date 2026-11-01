@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -56,11 +57,17 @@ from .const import (
     DEFAULT_AI_TASK_NAME,
     DEFAULT_CONVERSATION_NAME,
     DOMAIN,
-    EFFORT_OPTIONS,
     MIN_THINKING_BUDGET,
-    THINKING_TYPE_OPTIONS,
+    Model,
 )
 from .coordinator import ClaudeCodeConfigEntry
+from .model_options import (
+    get_efforts,
+    get_thinking_types,
+    reconcile_model_options,
+    supports_structured_output,
+    supports_web_search,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -282,6 +289,7 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
     """Flow for managing conversation and AI task subentries."""
 
     options: dict[str, Any]
+    _model: Model
 
     @property
     def _is_new(self) -> bool:
@@ -371,13 +379,51 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                 and CONF_LLM_HASS_API not in user_input
             ):
                 self.options.pop(CONF_LLM_HASS_API)
-            return await self.async_step_model()
+            return await self.async_step_additional()
 
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
                 probatio.Schema(step_schema), self.options
             ),
+            # Only saves straight away with the recommended settings.
+            last_step=None if self.options.get(CONF_RECOMMENDED) else False,
+        )
+
+    async def async_step_additional(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Choose the model, which decides the options that follow."""
+        if user_input is not None:
+            self.options.update(user_input)
+            self._model = self._get_entry().runtime_data.get_model_info(
+                self.options[CONF_CHAT_MODEL]
+            )
+            reconcile_model_options(self.options, self._model)
+            return await self.async_step_model()
+
+        return self.async_show_form(
+            step_id="additional",
+            data_schema=self.add_suggested_values_to_schema(
+                probatio.Schema(
+                    {
+                        probatio.Optional(
+                            CONF_CHAT_MODEL,
+                            default=DEFAULT[CONF_CHAT_MODEL],
+                        ): SelectSelector(
+                            SelectSelectorConfig(
+                                # Fetch when the form opens, not again on submit.
+                                options=await self._async_get_model_list(
+                                    refresh=user_input is None
+                                ),
+                                custom_value=True,
+                            )
+                        ),
+                    }
+                ),
+                self.options,
+            ),
+            last_step=False,
         )
 
     async def async_step_model(
@@ -385,81 +431,108 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
     ) -> SubentryFlowResult:
         """Manage model-specific options."""
         errors: dict[str, str] = {}
+        model = self._model
 
         step_schema: VolDictType = {
             probatio.Optional(
-                CONF_CHAT_MODEL,
-                default=DEFAULT[CONF_CHAT_MODEL],
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    # Fetch when the form opens, not again on submit.
-                    options=await self._async_get_model_list(
-                        refresh=user_input is None
-                    ),
-                    custom_value=True,
-                )
-            ),
-            probatio.Optional(
                 CONF_MAX_TOKENS,
                 default=DEFAULT[CONF_MAX_TOKENS],
-            ): cv.positive_int,
-            probatio.Optional(
-                CONF_THINKING_TYPE,
-                default=DEFAULT[CONF_THINKING_TYPE],
-            ): SelectSelector(
+            ): probatio.All(
+                NumberSelector(
+                    NumberSelectorConfig(
+                        min=1, max=model.max_tokens, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                probatio.Coerce(int),
+            )
+            if model.max_tokens
+            else cv.positive_int,
+        }
+
+        thinking_types = get_thinking_types(model)
+        if len(thinking_types) > 1:
+            step_schema[
+                probatio.Optional(
+                    CONF_THINKING_TYPE,
+                    default=DEFAULT[CONF_THINKING_TYPE],
+                )
+            ] = SelectSelector(
                 SelectSelectorConfig(
-                    options=THINKING_TYPE_OPTIONS,
+                    options=thinking_types,
                     translation_key=CONF_THINKING_TYPE,
                     mode=SelectSelectorMode.DROPDOWN,
                 )
-            ),
-            probatio.Optional(
-                CONF_THINKING_BUDGET,
-                default=DEFAULT[CONF_THINKING_BUDGET],
-            ): probatio.All(
+            )
+        if "enabled" in thinking_types:
+            step_schema[
+                probatio.Optional(
+                    CONF_THINKING_BUDGET,
+                    default=DEFAULT[CONF_THINKING_BUDGET],
+                )
+            ] = probatio.All(
                 NumberSelector(
-                    NumberSelectorConfig(min=MIN_THINKING_BUDGET, max=64000)
+                    NumberSelectorConfig(
+                        min=MIN_THINKING_BUDGET,
+                        max=model.max_tokens or 64000,
+                        mode=NumberSelectorMode.BOX,
+                    )
                 ),
                 probatio.Coerce(int),
-            ),
-            probatio.Optional(
-                CONF_EFFORT,
-                default=DEFAULT[CONF_EFFORT],
-            ): SelectSelector(
+            )
+
+        efforts = get_efforts(model)
+        if len(efforts) > 1:
+            step_schema[
+                probatio.Optional(
+                    CONF_EFFORT,
+                    default=DEFAULT[CONF_EFFORT],
+                )
+            ] = SelectSelector(
                 SelectSelectorConfig(
-                    options=EFFORT_OPTIONS,
+                    options=efforts,
                     translation_key=CONF_EFFORT,
                     mode=SelectSelectorMode.DROPDOWN,
                 )
-            ),
+            )
+
+        step_schema[
             probatio.Optional(
                 CONF_CODE_EXECUTION,
                 default=DEFAULT[CONF_CODE_EXECUTION],
-            ): bool,
-            probatio.Optional(
-                CONF_WEB_SEARCH,
-                default=DEFAULT[CONF_WEB_SEARCH],
-            ): bool,
-            probatio.Optional(
-                CONF_WEB_SEARCH_USER_LOCATION,
-                default=DEFAULT[CONF_WEB_SEARCH_USER_LOCATION],
-            ): bool,
-            probatio.Optional(
-                CONF_WEB_FETCH,
-                default=DEFAULT[CONF_WEB_FETCH],
-            ): bool,
-            probatio.Optional(
-                CONF_SHOW_ACTIVITY,
-                default=DEFAULT[CONF_SHOW_ACTIVITY],
-            ): bool,
-            probatio.Optional(
-                CONF_RUN_TIMEOUT,
-                default=DEFAULT[CONF_RUN_TIMEOUT],
-            ): probatio.All(
-                NumberSelector(NumberSelectorConfig(min=0, max=1800)),
-                probatio.Coerce(int),
-            ),
-        }
+            )
+        ] = bool
+        if supports_web_search(model):
+            step_schema[
+                probatio.Optional(
+                    CONF_WEB_SEARCH,
+                    default=DEFAULT[CONF_WEB_SEARCH],
+                )
+            ] = bool
+            step_schema[
+                probatio.Optional(
+                    CONF_WEB_SEARCH_USER_LOCATION,
+                    default=DEFAULT[CONF_WEB_SEARCH_USER_LOCATION],
+                )
+            ] = bool
+        step_schema.update(
+            {
+                probatio.Optional(
+                    CONF_WEB_FETCH,
+                    default=DEFAULT[CONF_WEB_FETCH],
+                ): bool,
+                probatio.Optional(
+                    CONF_SHOW_ACTIVITY,
+                    default=DEFAULT[CONF_SHOW_ACTIVITY],
+                ): bool,
+                probatio.Optional(
+                    CONF_RUN_TIMEOUT,
+                    default=DEFAULT[CONF_RUN_TIMEOUT],
+                ): probatio.All(
+                    NumberSelector(NumberSelectorConfig(min=0, max=1800)),
+                    probatio.Coerce(int),
+                ),
+            }
+        )
 
         if user_input is not None:
             if user_input.get(CONF_THINKING_TYPE) == "enabled" and user_input.get(
@@ -499,4 +572,6 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
         return [
             SelectOptionDict(label=model.display_name, value=model.id)
             for model in models or []
+            if self._subentry_type != "ai_task_data"
+            or supports_structured_output(model)
         ]

@@ -454,6 +454,320 @@ async def test_new_deprecation_found_on_a_timer(
     assert _model_issue(hass, entry, "model_deprecated") is not None
 
 
+def _capabilities(
+    efforts: tuple[str, ...] = (),
+    thinking: tuple[str, ...] = (),
+    web_search: bool = True,
+    structured_outputs: bool = True,
+) -> dict[str, Any]:
+    """Return a model's capabilities in the shape Anthropic's API sends them."""
+    return {
+        "effort": {
+            "supported": bool(efforts),
+            **{
+                level: {"supported": level in efforts}
+                for level in ("low", "medium", "high", "xhigh", "max")
+            },
+        },
+        "thinking": {
+            "supported": bool(thinking),
+            "types": {
+                value: {"supported": value in thinking}
+                for value in ("adaptive", "between_tools", "disabled", "enabled")
+            },
+        },
+        "server_tools": {
+            "supported": web_search,
+            "code_execution": {"supported": False},
+            "web_search": {"supported": web_search},
+        },
+        "structured_outputs": {"supported": structured_outputs},
+    }
+
+
+LIMITED_MODEL = {
+    "id": "claude-limited-1",
+    "display_name": "Claude Limited 1",
+    "lifecycle": "active",
+    "max_tokens": 8000,
+    "capabilities": _capabilities(
+        efforts=("low", "high"), thinking=("disabled", "enabled"), web_search=False
+    ),
+}
+ALL_OPTIONS = {
+    "max_tokens",
+    "thinking_type",
+    "thinking_budget",
+    "effort",
+    "code_execution",
+    "web_search",
+    "user_location",
+    "web_fetch",
+    "show_activity",
+    "run_timeout",
+}
+
+
+async def _open_options(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    model: str,
+    subentry_type: str = "conversation",
+) -> Any:
+    """Pick a model in a subentry's flow, returning the form that follows."""
+    subentry_id = next(
+        sid for sid, sub in entry.subentries.items() if sub.subentry_type == subentry_type
+    )
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, subentry_type),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"recommended": False}
+    )
+    return await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"chat_model": model}
+    )
+
+
+async def test_forms_that_dont_save_say_next(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """Only the form that saves offers to finish."""
+    _mock_models(mock_models_api)
+    entry = _model_entry("claude-new-9")
+    await _setup(hass, entry)
+    subentry_id = next(
+        sid for sid, sub in entry.subentries.items() if sub.subentry_type == "conversation"
+    )
+
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "conversation"),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+    assert result["last_step"] is False
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"recommended": False}
+    )
+    assert result["step_id"] == "additional"
+    assert result["last_step"] is False
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"chat_model": "claude-new-9"}
+    )
+    assert result["step_id"] == "model"
+    assert result["last_step"] is True
+
+
+async def test_options_follow_the_models_capabilities(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """The form only offers what the chosen model supports."""
+    from homeassistant.helpers.selector import NumberSelectorMode
+
+    _mock_models(mock_models_api, LIMITED_MODEL)
+    entry = _model_entry("claude-new-9")
+    await _setup(hass, entry)
+
+    result = await _open_options(hass, entry, "claude-limited-1")
+
+    assert result["step_id"] == "model"
+    _assert_form_serializes(result)
+    schema = result["data_schema"].schema
+    assert {str(key) for key in schema} == ALL_OPTIONS - {"web_search", "user_location"}
+    selectors = {str(key): value for key, value in schema.items()}
+    assert selectors["effort"].config["options"] == ["default", "low", "high"]
+    assert selectors["thinking_type"].config["options"] == [
+        "default",
+        "enabled",
+        "disabled",
+    ]
+    for field in ("max_tokens", "thinking_budget"):
+        assert selectors[field].validators[0].config["max"] == 8000
+        assert selectors[field].validators[0].config["mode"] == NumberSelectorMode.BOX
+
+
+async def test_options_hide_what_a_model_has_no_choice_about(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """A model without effort or thinking leaves those settings out."""
+    _mock_models(
+        mock_models_api,
+        {
+            "id": "claude-plain-1",
+            "display_name": "Claude Plain 1",
+            "lifecycle": "active",
+            "capabilities": _capabilities(),
+        },
+    )
+    entry = _model_entry("claude-new-9")
+    await _setup(hass, entry)
+
+    result = await _open_options(hass, entry, "claude-plain-1")
+
+    assert {str(key) for key in result["data_schema"].schema} == ALL_OPTIONS - {
+        "thinking_type",
+        "thinking_budget",
+        "effort",
+    }
+
+
+@pytest.mark.parametrize(
+    "model", ["default", "claude-new-9", "sonnet"], ids=["account-default", "no-data", "alias"]
+)
+async def test_options_all_shown_when_capabilities_are_unknown(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker, model: str
+) -> None:
+    """Without capability data, every option stays available."""
+    _mock_models(mock_models_api)
+    entry = _model_entry("claude-new-9")
+    await _setup(hass, entry)
+
+    result = await _open_options(hass, entry, model)
+
+    assert result["step_id"] == "model"
+    assert {str(key) for key in result["data_schema"].schema} == ALL_OPTIONS
+
+
+async def test_ai_task_only_offers_structured_output_models(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """An AI task needs structured output, so other models aren't offered."""
+    _mock_models(
+        mock_models_api,
+        {
+            "id": "claude-free-1",
+            "display_name": "Claude Free 1",
+            "lifecycle": "active",
+            "capabilities": _capabilities(structured_outputs=False),
+        },
+    )
+    entry = _model_entry("claude-new-9")
+    await _setup(hass, entry)
+
+    subentry_id = next(
+        sid for sid, sub in entry.subentries.items() if sub.subentry_type == "ai_task_data"
+    )
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "ai_task_data"),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"recommended": False}
+    )
+    selector = next(
+        value for key, value in result["data_schema"].schema.items() if key == "chat_model"
+    )
+
+    assert [option["value"] for option in selector.config["options"]] == [
+        "default",
+        "claude-new-9",
+    ]
+
+
+async def test_saved_options_adapt_to_the_model_at_run_time(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """A run corrects saved options the model doesn't support, without saving."""
+    from homeassistant.components import conversation
+
+    _mock_models(mock_models_api, LIMITED_MODEL)
+    saved = {
+        "recommended": False,
+        "chat_model": "claude-limited-1",
+        "max_tokens": 16000,
+        "thinking_type": "adaptive",
+        "effort": "max",
+        "web_search": True,
+        "web_fetch": True,
+    }
+    entry = _entry(conversation_data=saved)
+    await _setup(hass, entry)
+
+    seen: list[Any] = []
+    with patch(
+        "custom_components.claude.entity.query",
+        _fake_query([*_text_deltas("Hi"), ResultMessage()], seen),
+    ):
+        await conversation.async_converse(
+            hass, "hello", None, None, agent_id="conversation.claude_conversation"
+        )
+
+    assert seen[0].thinking is None
+    assert seen[0].effort == "high"
+    assert seen[0].tools == ["WebFetch"]
+    assert seen[0].env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "8000"
+    subentry = next(
+        sub for sub in entry.subentries.values() if sub.subentry_type == "conversation"
+    )
+    assert subentry.data["effort"] == "max"
+
+
+@pytest.mark.parametrize(
+    ("model", "options", "expected"),
+    [
+        (
+            {"id": "claude-x-1", "capabilities": _capabilities(efforts=("low", "high"))},
+            {"effort": "medium"},
+            {"effort": "low"},
+        ),
+        (
+            {"id": "claude-x-1", "capabilities": _capabilities(efforts=("high",))},
+            {"effort": "low"},
+            {"effort": "high"},
+        ),
+        (
+            {"id": "claude-x-1", "capabilities": _capabilities()},
+            {"effort": "high", "thinking_type": "enabled", "thinking_budget": 2048},
+            {"effort": "default", "thinking_type": "default"},
+        ),
+        (
+            {"id": "claude-x-1", "capabilities": _capabilities(thinking=("enabled",))},
+            {"thinking_type": "enabled", "thinking_budget": 5000, "max_tokens": 4096},
+            {"thinking_type": "enabled", "thinking_budget": 4095, "max_tokens": 4096},
+        ),
+        (
+            {"id": "claude-x-1", "capabilities": _capabilities(thinking=("enabled",))},
+            {"thinking_type": "enabled", "thinking_budget": 2000, "max_tokens": 1000},
+            {"thinking_type": "enabled", "thinking_budget": 1024, "max_tokens": 1025},
+        ),
+        (
+            {
+                "id": "claude-haiku-5-5-20260101",
+                "capabilities": _capabilities(
+                    efforts=("low", "high", "max"), thinking=("disabled", "adaptive")
+                ),
+            },
+            {"effort": "max", "thinking_type": "disabled"},
+            {"effort": "high", "thinking_type": "disabled"},
+        ),
+        (
+            {"id": "claude-x-1"},
+            {"effort": "max", "thinking_type": "adaptive", "web_search": True},
+            {"effort": "max", "thinking_type": "adaptive", "web_search": True},
+        ),
+    ],
+    ids=[
+        "effort-next-lower",
+        "effort-next-higher",
+        "no-effort-or-thinking",
+        "budget-under-max-tokens",
+        "max-tokens-over-budget",
+        "known-restriction",
+        "unknown-capabilities",
+    ],
+)
+def test_reconcile_model_options(
+    model: dict[str, Any], options: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """Options are moved to the nearest thing the model supports."""
+    from custom_components.claude.agent import _model_from_api
+    from custom_components.claude.model_options import reconcile_model_options
+
+    reconcile_model_options(options, _model_from_api(model))
+
+    assert {key: options[key] for key in expected} == expected
+
+
 def _assert_form_serializes(result: Any) -> None:
     """Serialize a form's schema the way the flow API sends it to the frontend."""
     assert probatio.to_field_list(
@@ -493,7 +807,7 @@ async def test_model_options_refetch_and_keep_list_on_failure(
         result = await hass.config_entries.subentries.async_configure(
             result["flow_id"], {"recommended": False}
         )
-        assert result["step_id"] == "model"
+        assert result["step_id"] == "additional"
         _assert_form_serializes(result)
         selector = next(
             value
@@ -831,6 +1145,9 @@ async def test_thinking_budget_only_checked_when_it_applies(
     )
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"recommended": False}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"chat_model": "default"}
     )
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],

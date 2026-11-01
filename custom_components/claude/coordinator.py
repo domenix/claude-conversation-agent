@@ -31,22 +31,17 @@ from .const import (
     PERIODIC_CHECK_INTERVAL,
     TOKEN_EXPIRY_WARNING,
     Model,
+    model_alias,
 )
 
 type ClaudeCodeConfigEntry = ConfigEntry[ClaudeCodeCoordinator]
 
 
-def _model_alias(model_id: str) -> str:
-    """Resolve the alias of a dated model ID."""
-    model, _, version = model_id.rpartition("-")
-    return model if len(version) == 8 and version.isdecimal() else model_id
-
-
 def _find_model(models: list[Model], model_id: str) -> Model | None:
     """Find a model by its ID, or else by its alias."""
-    alias = _model_alias(model_id)
+    alias = model_alias(model_id)
     return next((model for model in models if model.id == model_id), None) or next(
-        (model for model in models if _model_alias(model.id) == alias), None
+        (model for model in models if model_alias(model.id) == alias), None
     )
 
 

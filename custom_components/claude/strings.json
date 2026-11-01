@@ -85,9 +85,17 @@
           },
           "title": "Basic settings"
         },
+        "additional": {
+          "data": {
+            "chat_model": "Model"
+          },
+          "data_description": {
+            "chat_model": "The model to serve the responses. 'Account default' uses your Claude default model."
+          },
+          "title": "Model"
+        },
         "model": {
           "data": {
-            "chat_model": "Model",
             "code_execution": "Code execution",
             "max_tokens": "Maximum tokens to return in response",
             "effort": "Effort",
@@ -100,7 +108,6 @@
             "run_timeout": "Run timeout (seconds)"
           },
           "data_description": {
-            "chat_model": "The model to serve the responses. 'Account default' uses your Claude default model.",
             "code_execution": "Allow the model to run shell commands and read/write files in a scratch workspace inside the Home Assistant process.",
             "max_tokens": "Limit the number of response tokens per model turn.",
             "effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
@@ -145,9 +152,17 @@
           },
           "title": "Basic settings"
         },
+        "additional": {
+          "data": {
+            "chat_model": "Model"
+          },
+          "data_description": {
+            "chat_model": "The model to serve the responses. 'Account default' uses your Claude default model."
+          },
+          "title": "Model"
+        },
         "model": {
           "data": {
-            "chat_model": "Model",
             "code_execution": "Code execution",
             "max_tokens": "Maximum tokens to return in response",
             "effort": "Effort",
@@ -160,7 +175,6 @@
             "run_timeout": "Run timeout (seconds)"
           },
           "data_description": {
-            "chat_model": "The model to serve the responses. 'Account default' uses your Claude default model.",
             "code_execution": "Allow the model to run shell commands and read/write files in a scratch workspace inside the Home Assistant process.",
             "max_tokens": "Limit the number of response tokens per model turn.",
             "effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",

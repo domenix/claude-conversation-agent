@@ -41,6 +41,7 @@ from .const import (
     WEB_SEARCH_TOOL,
 )
 from .coordinator import ClaudeCodeConfigEntry, ClaudeCodeCoordinator
+from .model_options import reconcile_model_options
 
 
 def _to_json_schema(
@@ -324,6 +325,14 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
             entry_type=dr.DeviceEntryType.SERVICE,
         )
 
+    def _run_options(self) -> dict[str, Any]:
+        """Return the subentry's options, adapted to what its model supports."""
+        options = DEFAULT | dict(self.subentry.data)
+        reconcile_model_options(
+            options, self.entry.runtime_data.get_model_info(options[CONF_CHAT_MODEL])
+        )
+        return options
+
     def _user_location(self) -> str | None:
         """Compose an approximate location string from the HA config."""
         hass = self.hass
@@ -346,7 +355,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
                 translation_domain=DOMAIN, translation_key="system_message_not_found"
             )
         prompt = system.content or ""
-        options = DEFAULT | dict(self.subentry.data)
+        options = self._run_options()
         if options[CONF_WEB_SEARCH] and options[CONF_WEB_SEARCH_USER_LOCATION]:
             if location := self._user_location():
                 prompt += f"\n\nThe user's approximate location: {location}"
@@ -358,7 +367,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
 
     def _builtin_tools(self) -> list[str]:
         """Return the Claude built-in tools the subentry options enable."""
-        options = DEFAULT | dict(self.subentry.data)
+        options = self._run_options()
         tools: list[str] = []
         if options[CONF_WEB_SEARCH]:
             tools.append(WEB_SEARCH_TOOL)
@@ -425,7 +434,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
         """
         coordinator = self.entry.runtime_data
         agent: ClaudeAgent = coordinator.agent
-        options = DEFAULT | dict(self.subentry.data)
+        options = self._run_options()
 
         session_id = coordinator.session_ids.get(chat_log.conversation_id)
 

@@ -314,6 +314,8 @@ def _model_from_api(item: dict[str, Any]) -> Model:
         item.get("display_name") or item["id"],
         lifecycle=item.get("lifecycle"),
         retires_at=item.get("retires_at"),
+        capabilities=item.get("capabilities"),
+        max_tokens=item.get("max_tokens"),
     )
 
 
