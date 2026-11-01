@@ -17,7 +17,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, llm
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .agent import ClaudeAgent, ClaudeAgentError, CredentialsInvalidError, query
+from .agent import (
+    ClaudeAgent,
+    ClaudeAgentError,
+    CredentialsInvalidError,
+    query,
+    raise_for_result,
+)
 from .const import (
     CODE_TOOLS,
     CONF_CHAT_MODEL,
@@ -105,6 +111,7 @@ class SDKDeltaStream:
         self._need_role = True
         self._claude_tool_names: dict[str, str] = {}
         self.result_error: str | None = None
+        self.api_error: str | None = None
         self.stop_reason: str | None = None
         self.structured_output: Any = None
         self._message_id: str | None = None
@@ -205,6 +212,7 @@ class SDKDeltaStream:
         # HA tools (run in-process by the SDK MCP server) and Claude built-ins
         # (run by the CLI) — are already executed by the agent loop, so they are
         # marked external and chat_log records them without re-executing.
+        self.api_error = message.error
         for block in message.content:
             if type(block).__name__ != "ToolUseBlock":
                 continue
@@ -263,11 +271,7 @@ class SDKDeltaStream:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN, translation_key=translation_key
                 )
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="run_error",
-                translation_placeholders={"message": self.result_error},
-            )
+            raise_for_result(self.result_error, self.api_error)
 
 
 def _strip_prefix(name: str) -> str:
@@ -458,7 +462,14 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
                 else llm.selector_serializer,
             )
 
-        await agent.async_prepare()
+        try:
+            await agent.async_prepare()
+        except ClaudeAgentError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="run_error",
+                translation_placeholders={"message": str(err)},
+            ) from err
         tool_server = agent.build_tool_server(
             tools, chat_log.llm_api, coordinator.tool_timeout
         )

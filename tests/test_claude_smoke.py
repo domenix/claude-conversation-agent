@@ -60,8 +60,9 @@ class ToolResultBlock:
 
 
 class AssistantMessage:
-    def __init__(self, content: list[Any]) -> None:
+    def __init__(self, content: list[Any], error: str | None = None) -> None:
         self.content = content
+        self.error = error
 
 
 class UserMessage:
@@ -1309,16 +1310,114 @@ async def test_run_recovered_from_a_limit_succeeds() -> None:
     assert {"content": "Done"} in deltas
 
 
-async def test_unrelated_failure_keeps_its_message() -> None:
-    """A failed run that hit no limit still reports the CLI's own message."""
+async def _converse_failing(
+    hass: HomeAssistant, messages: list[Any]
+) -> tuple[MockConfigEntry, Any]:
+    """Run a conversation turn on a fresh entry that ends in the given messages."""
+    from homeassistant.components import conversation
+
+    entry = _entry()
+    await _setup(hass, entry)
+    with patch("custom_components.claude.entity.query", _fake_query(messages)):
+        result = await conversation.async_converse(
+            hass, "hello", None, None, agent_id="conversation.claude_conversation"
+        )
+    await hass.async_block_till_done()
+    return entry, result
+
+
+def _reauth_flows(hass: HomeAssistant, entry: MockConfigEntry) -> list[Any]:
+    return list(entry.async_get_active_flows(hass, {"reauth"}))
+
+
+def _failed_result(text: str) -> ResultMessage:
     failed = ResultMessage(is_error=True)
-    failed.result = "There's an issue with the selected model"
+    failed.result = text
+    return failed
 
-    with pytest.raises(HomeAssistantError) as excinfo:
-        await _collect([_message_delta("end_turn"), failed])
 
-    assert excinfo.value.translation_key == "run_error"
-    assert excinfo.value.translation_placeholders == {"message": failed.result}
+# What CLI 2.1.210 reports. The first two are from Anthropic's API, the third from
+# a stub of it, which is why the wording can't be relied on to spot them.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+        "Invalid API key · Fix external API key",
+        "Your account does not have access to Claude. Please login again or contact"
+        " your administrator.",
+    ],
+)
+async def test_run_with_rejected_credentials_asks_to_reauthenticate(
+    hass: HomeAssistant, text: str
+) -> None:
+    """A token that dies after setup is only noticed by the run that hits it."""
+    entry, result = await _converse_failing(
+        hass,
+        [AssistantMessage([], error="authentication_failed"), _failed_result(text)],
+    )
+
+    assert result.response.response_type is intent.IntentResponseType.ERROR
+    assert "no valid credentials" in result.response.speech["plain"]["speech"]
+    assert len(_reauth_flows(hass, entry)) == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        # The key is fine; the account only needs topping up.
+        ("Credit balance is too low", "billing_error"),
+        ("There's an issue with the selected model", "invalid_request"),
+        # A run's message can quote anything, so its wording decides nothing.
+        ("No conversation found with session ID: 401f-authentication", None),
+        # Offline, the CLI blames authentication.
+        ("unable to refresh authentication token: fetch failed", "authentication_failed"),
+    ],
+)
+async def test_other_failed_runs_keep_their_message(
+    hass: HomeAssistant, text: str, error: str | None
+) -> None:
+    """A failure that isn't about the credentials must not ask for new ones."""
+    entry, result = await _converse_failing(
+        hass, [AssistantMessage([], error=error), _failed_result(text)]
+    )
+
+    assert result.response.response_type is intent.IntentResponseType.ERROR
+    assert text in result.response.speech["plain"]["speech"]
+    assert not _reauth_flows(hass, entry)
+
+
+async def test_run_only_answers_for_its_last_api_error(hass: HomeAssistant) -> None:
+    """An API error the CLI got past says nothing about how the run failed."""
+    entry, result = await _converse_failing(
+        hass,
+        [
+            AssistantMessage([], error="authentication_failed"),
+            AssistantMessage([]),
+            _failed_result("Something else broke"),
+        ],
+    )
+
+    assert "Something else broke" in result.response.speech["plain"]["speech"]
+    assert not _reauth_flows(hass, entry)
+
+
+async def test_run_reports_cli_preparation_failure(
+    hass: HomeAssistant, mock_prepare: AsyncMock
+) -> None:
+    """The CLI going missing is an error reply, not an unhandled exception."""
+    from homeassistant.components import conversation
+
+    from custom_components.claude.agent import ClaudeAgentError
+
+    await _setup(hass, _entry())
+    mock_prepare.side_effect = ClaudeAgentError("Claude Code CLI unavailable: gone")
+
+    result = await conversation.async_converse(
+        hass, "hello", None, None, agent_id="conversation.claude_conversation"
+    )
+
+    assert result.response.response_type is intent.IntentResponseType.ERROR
+    assert "Claude Code CLI unavailable: gone" in result.response.speech["plain"]["speech"]
 
 
 async def test_refusal_raises() -> None:
@@ -1478,7 +1577,7 @@ def test_result_classification_network_beats_auth_wording() -> None:
     from custom_components.claude.agent import (
         ClaudeAgentError,
         CredentialsInvalidError,
-        _raise_for_result,
+        raise_for_result,
     )
 
     for message in (
@@ -1487,11 +1586,11 @@ def test_result_classification_network_beats_auth_wording() -> None:
         "authentication check timed out",
     ):
         with pytest.raises(ClaudeAgentError) as excinfo:
-            _raise_for_result(message)
+            raise_for_result(message, match_wording=True)
         assert not isinstance(excinfo.value, CredentialsInvalidError), message
 
     with pytest.raises(CredentialsInvalidError):
-        _raise_for_result("401 invalid bearer token")
+        raise_for_result("401 invalid bearer token", match_wording=True)
 
 
 class TestVerifyReal:
@@ -1517,6 +1616,97 @@ class TestVerifyReal:
         ):
             with pytest.raises(ClaudeAgentError, match="OSError: boom"):
                 await agent.async_verify()
+
+
+class TestVerifyClassification:
+    """How the setup check treats what the real async_verify sees."""
+
+    @pytest.fixture(autouse=True)
+    def mock_verify(self) -> Generator[None]:
+        """Keep the real async_verify."""
+        yield
+
+    @pytest.mark.parametrize(
+        ("messages", "state", "reauth_flows"),
+        [
+            (
+                [
+                    AssistantMessage([], error="authentication_failed"),
+                    _failed_result("Invalid API key · Fix external API key"),
+                ],
+                ConfigEntryState.SETUP_ERROR,
+                1,
+            ),
+            # Retrying recovers by itself once the account is topped up.
+            (
+                [
+                    AssistantMessage([], error="billing_error"),
+                    _failed_result("Credit balance is too low"),
+                ],
+                ConfigEntryState.SETUP_RETRY,
+                0,
+            ),
+            (
+                [_failed_result("Credit balance is too low")],
+                ConfigEntryState.SETUP_RETRY,
+                0,
+            ),
+            # When the CLI says what failed, its stderr's wording doesn't overrule it.
+            (
+                [
+                    AssistantMessage([], error="billing_error"),
+                    _failed_result("Credit balance is too low :: HTTP 401 retried"),
+                ],
+                ConfigEntryState.SETUP_RETRY,
+                0,
+            ),
+            # A CLI that doesn't say what failed still gets its wording read.
+            (
+                [_failed_result("401 invalid bearer token")],
+                ConfigEntryState.SETUP_ERROR,
+                1,
+            ),
+            (
+                [
+                    AssistantMessage([], error="unknown"),
+                    _failed_result("401 invalid bearer token"),
+                ],
+                ConfigEntryState.SETUP_ERROR,
+                1,
+            ),
+            # Stay retryable offline, even when the CLI blames authentication.
+            (
+                [
+                    AssistantMessage([], error="authentication_failed"),
+                    _failed_result("unable to refresh authentication token: fetch failed"),
+                ],
+                ConfigEntryState.SETUP_RETRY,
+                0,
+            ),
+        ],
+    )
+    async def test_failed_check_sets_entry_state(
+        self,
+        hass: HomeAssistant,
+        messages: list[Any],
+        state: ConfigEntryState,
+        reauth_flows: int,
+    ) -> None:
+        """Only rejected credentials ask for new ones; the rest retries."""
+
+        async def _query(prompt: Any, options: Any) -> AsyncIterator[Any]:
+            for message in messages:
+                yield message
+
+        entry = _entry()
+        assert await async_setup_component(hass, "homeassistant", {})
+        entry.add_to_hass(hass)
+        with patch("custom_components.claude.agent.query", _query):
+            await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+        assert entry.state is state
+        assert len(_reauth_flows(hass, entry)) == reauth_flows
 
 
 async def test_brand_images_shipped(hass: HomeAssistant) -> None:

@@ -40,7 +40,13 @@ from .const import (
 )
 
 # Re-exported so callers stream messages without importing the SDK directly.
-__all__ = ["ClaudeAgent", "ClaudeAgentError", "CredentialsInvalidError", "query"]
+__all__ = [
+    "ClaudeAgent",
+    "ClaudeAgentError",
+    "CredentialsInvalidError",
+    "query",
+    "raise_for_result",
+]
 
 VERIFY_MODEL = "claude-haiku-4-5"
 
@@ -290,13 +296,18 @@ class ClaudeAgent:
             tail = " | ".join(stderr_lines[-5:])
             return f"{base} :: {tail}" if tail else base
 
+        api_error: str | None = None
         try:
             async for message in query(prompt="ok", options=options):
+                if type(message).__name__ == "AssistantMessage":
+                    api_error = message.error
                 if type(message).__name__ != "ResultMessage":
                     continue
                 if getattr(message, "is_error", False):
                     errors = getattr(message, "result", None) or message.subtype
-                    _raise_for_result(_detail(str(errors)))
+                    raise_for_result(
+                        _detail(str(errors)), api_error, match_wording=True
+                    )
                 return
             # Stream ended without a ResultMessage — treat as a failure and
             # surface whatever the CLI wrote to stderr.
@@ -324,8 +335,18 @@ def _error(message: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": f"Error: {message}"}], "is_error": True}
 
 
-def _raise_for_result(message: str) -> None:
+def raise_for_result(
+    message: str, error: str | None = None, *, match_wording: bool = False
+) -> None:
     """Classify a failing result message into an auth vs generic error.
+
+    ``error`` is the SDK's ``AssistantMessage.error``. It spots rejected credentials
+    the wording doesn't ("Invalid API key", a 403) and tells them apart from an
+    account that only needs topping up, which must not ask for new credentials.
+
+    ``match_wording`` falls back on the message when the CLI doesn't say what failed.
+    That suits the setup check, whose message is short. A chat run's can quote
+    anything, such as a session ID containing "401", so it relies on ``error`` alone.
 
     Network trouble wins over auth wording: an offline CLI frequently phrases
     its failure in auth terms ("unable to refresh authentication token", 401s
@@ -356,9 +377,15 @@ def _raise_for_result(message: str) -> None:
         )
     ):
         raise ClaudeAgentError(message)
-    if any(
-        token in lowered
-        for token in ("401", "invalid bearer", "authentication", "unauthorized", "credit")
+    if error == "authentication_failed":
+        raise CredentialsInvalidError(message)
+    if (
+        match_wording
+        and error in (None, "unknown")
+        and any(
+            token in lowered
+            for token in ("401", "invalid bearer", "authentication", "unauthorized")
+        )
     ):
         raise CredentialsInvalidError(message)
     raise ClaudeAgentError(message)
