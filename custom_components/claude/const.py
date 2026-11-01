@@ -23,6 +23,7 @@ TOKEN_EXPIRY_WARNING = timedelta(days=14)
 ISSUE_TOKEN_EXPIRING = "oauth_token_expiring"
 ISSUE_TOKEN_EXPIRED = "oauth_token_expired"
 ISSUE_MODEL_DEPRECATED = "model_deprecated"
+ISSUE_CODE_EXECUTION = "code_execution_enabled"
 
 # How often to re-check the token's expiry and the models' lifecycle.
 PERIODIC_CHECK_INTERVAL = timedelta(hours=12)

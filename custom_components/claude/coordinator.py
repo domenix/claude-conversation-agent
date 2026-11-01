@@ -16,11 +16,13 @@ from .agent import ClaudeAgent, ClaudeAgentError, CredentialsInvalidError
 from .const import (
     CONF_API_KEY,
     CONF_CHAT_MODEL,
+    CONF_CODE_EXECUTION,
     CONF_OAUTH_EXPIRES_AT,
     CONF_OAUTH_TOKEN,
     DEFAULT_RUN_TIMEOUT_S,
     DEFAULT_TOOL_TIMEOUT_S,
     DOMAIN,
+    ISSUE_CODE_EXECUTION,
     ISSUE_MODEL_DEPRECATED,
     ISSUE_TOKEN_EXPIRED,
     ISSUE_TOKEN_EXPIRING,
@@ -93,6 +95,8 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
         )
         # Setup raises it again, so changing a subentry's model clears it.
         self.config_entry.async_on_unload(self._async_delete_model_issue)
+        self.config_entry.async_on_unload(self._async_delete_code_execution_issue)
+        self._async_check_code_execution()
 
     @property
     def token_expires_at(self) -> datetime | None:
@@ -239,6 +243,31 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
         ir.async_delete_issue(
             self.hass, DOMAIN, self._issue_id(ISSUE_MODEL_DEPRECATED)
         )
+
+    @callback
+    def _async_check_code_execution(self) -> None:
+        """Warn about agents that can run commands on this system."""
+        agents = [
+            subentry.title
+            for subentry in self.config_entry.subentries.values()
+            if subentry.data.get(CONF_CODE_EXECUTION)
+        ]
+        if not agents:
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._issue_id(ISSUE_CODE_EXECUTION),
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_CODE_EXECUTION,
+            translation_placeholders={"agents": ", ".join(agents)},
+        )
+
+    @callback
+    def _async_delete_code_execution_issue(self) -> None:
+        """Delete the repair issue about this entry's code execution."""
+        ir.async_delete_issue(self.hass, DOMAIN, self._issue_id(ISSUE_CODE_EXECUTION))
 
     @callback
     def async_set_auth_failed(self) -> None:

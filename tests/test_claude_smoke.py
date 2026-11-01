@@ -1091,6 +1091,60 @@ async def test_oauth_flow_completes_with_the_code_from_its_link(
     assert result["data"]["oauth_token"] == "sk-ant-oat01-secret"
 
 
+def _code_execution_entry() -> MockConfigEntry:
+    return _entry(conversation_data={"recommended": False, "code_execution": True})
+
+
+async def test_code_execution_raises_a_warning(hass: HomeAssistant) -> None:
+    """An agent that can run commands on this system warns, naming the agent."""
+    entry = _code_execution_entry()
+    await _setup(hass, entry)
+
+    issue = _model_issue(hass, entry, "code_execution_enabled")
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.translation_placeholders == {"agents": "Claude conversation"}
+
+
+async def test_no_code_execution_warning_when_off(hass: HomeAssistant) -> None:
+    """Agents that can't run commands raise nothing."""
+    entry = _entry()
+    await _setup(hass, entry)
+
+    assert _model_issue(hass, entry, "code_execution_enabled") is None
+
+
+async def test_code_execution_warning_clears_when_turned_off(
+    hass: HomeAssistant,
+) -> None:
+    """Turning the option off removes the warning."""
+    entry = _code_execution_entry()
+    await _setup(hass, entry)
+    subentry = next(
+        sub for sub in entry.subentries.values() if sub.subentry_type == "conversation"
+    )
+
+    hass.config_entries.async_update_subentry(
+        entry, subentry, data={"recommended": False, "code_execution": False}
+    )
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert _model_issue(hass, entry, "code_execution_enabled") is None
+
+
+async def test_code_execution_warning_clears_when_entry_is_removed(
+    hass: HomeAssistant,
+) -> None:
+    """Removing the integration leaves no warning about it behind."""
+    entry = _code_execution_entry()
+    await _setup(hass, entry)
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _model_issue(hass, entry, "code_execution_enabled") is None
+
+
 @pytest.mark.parametrize(
     ("days", "issue_id"),
     [(3, "oauth_token_expiring"), (-1, "oauth_token_expired")],

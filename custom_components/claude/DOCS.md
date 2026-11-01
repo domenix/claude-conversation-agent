@@ -58,7 +58,7 @@ web fetch, code execution), from the integration's subentries.
 | Thinking type | Default (Claude decides), adaptive, enabled or disabled. |
 | Thinking budget | Token budget for the "enabled" thinking type. |
 | Effort | Effort level (default/low/medium/high/xhigh/max). |
-| Code execution | Allow Bash / file tools in a scratch workspace inside HA. |
+| Code execution | Allow Bash / file tools on this system, with no sandbox. See [Known limitations](#known-limitations). |
 | Web search / Web fetch | Enable Claude's WebSearch / WebFetch tools. |
 | Include home location | Localize web search to your home location. |
 
@@ -79,7 +79,7 @@ changed via **Reconfigure** or the reauth prompt.
 | Streaming responses | Same |
 | Thinking type / budget / effort | Same, plus "Default" to let Claude decide |
 | Web search / web fetch | Claude WebSearch / WebFetch tools |
-| Code execution | Claude Bash/file tools, in a scratch workspace |
+| Code execution | Claude Bash/file tools, on this system with no sandbox |
 | Attachments (images, PDF) | Same |
 | AI Task structured output | Native JSON-schema output |
 | Prompt caching strategy | Managed automatically by Claude |
@@ -95,8 +95,11 @@ changed via **Reconfigure** or the reauth prompt.
 - The CLI is fetched for your platform (`linux-arm64`/`linux-x64`, glibc or
   musl) from Anthropic's release server on first setup; it needs outbound
   internet and ~250 MB free under `/config`.
-- Code execution runs inside the Home Assistant process, as root; leave it off
-  unless you trust the exposed conversation.
+- Code execution has no sandbox. It runs with Home Assistant's own rights, which is
+  root on Home Assistant OS, so it can read and change everything, including your
+  passwords and tokens. Anyone who can talk to the agent, or any text it reads, could
+  make use of this. Leave it off unless you trust all of them. Repairs shows a warning
+  while it's on.
 - Citations are not surfaced.
 
 ## Troubleshooting

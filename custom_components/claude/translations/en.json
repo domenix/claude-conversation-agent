@@ -41,9 +41,6 @@
         "description": "1. Open this link and approve access: [Log in with Claude]({url})\n2. Copy the code shown after approving.\n3. Paste it below.",
         "data": {
           "code": "Authorization code"
-        },
-        "data_description": {
-          "code": "The `code#state` value shown by Claude after you approve access."
         }
       },
       "manual": {
@@ -108,7 +105,7 @@
             "run_timeout": "Run timeout (seconds)"
           },
           "data_description": {
-            "code_execution": "Allow the model to run shell commands and read/write files in a scratch workspace inside the Home Assistant process.",
+            "code_execution": "Let Claude run any command and read or change any file on this system, with no sandbox and with Home Assistant's own rights, which is root on Home Assistant OS. That includes your passwords and tokens. Anyone who can talk to this agent, or any text it reads, could make use of this. Leave it off unless you trust all of them.",
             "max_tokens": "Limit the number of response tokens per model turn.",
             "effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
             "thinking_budget": "Tokens available for thinking when the thinking type is 'Enabled'. Must be less than the maximum tokens.",
@@ -175,7 +172,7 @@
             "run_timeout": "Run timeout (seconds)"
           },
           "data_description": {
-            "code_execution": "Allow the model to run shell commands and read/write files in a scratch workspace inside the Home Assistant process.",
+            "code_execution": "Let Claude run any command and read or change any file on this system, with no sandbox and with Home Assistant's own rights, which is root on Home Assistant OS. That includes your passwords and tokens. Anyone who can talk to this agent, or any text it reads, could make use of this. Leave it off unless you trust all of them.",
             "max_tokens": "Limit the number of response tokens per model turn.",
             "effort": "Control how much effort Claude uses when responding, trading off between response thoroughness and token efficiency. 'Default' lets Claude decide.",
             "thinking_budget": "Tokens available for thinking when the thinking type is 'Enabled'. Must be less than the maximum tokens.",
@@ -227,6 +224,10 @@
     }
   },
   "issues": {
+    "code_execution_enabled": {
+      "title": "Claude can run commands on this system",
+      "description": "Code execution is on for: {agents}. These agents can run any command and read or change any file on this system, including your passwords and tokens. There is no sandbox. Anyone who can talk to them could make them do this, and so could any text they read, such as a web page or a device name.\n\nTo turn it off, go to Settings > Devices & services > Claude, reconfigure each agent named above, and turn off Code execution."
+    },
     "model_deprecated": {
       "title": "Claude model going away",
       "description": "Anthropic has deprecated the model used by: {agents}. It keeps working until it retires, then those agents stop responding.\n\nGo to Settings > Devices & services > Claude, reconfigure each one, and pick another model or turn on the recommended settings."
