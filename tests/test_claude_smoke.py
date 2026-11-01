@@ -768,6 +768,28 @@ def test_reconcile_model_options(
     assert {key: options[key] for key in expected} == expected
 
 
+async def test_ai_tools_show_as_a_checkbox_list(hass: HomeAssistant) -> None:
+    """The AI tools field lists every option as a checkbox."""
+    from homeassistant.helpers.selector import SelectSelectorMode
+
+    entry = _entry()
+    await _setup(hass, entry)
+    subentry_id = next(
+        sid for sid, sub in entry.subentries.items() if sub.subentry_type == "conversation"
+    )
+
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "conversation"),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+
+    selector = next(
+        value for key, value in result["data_schema"].schema.items() if key == "llm_hass_api"
+    )
+    assert selector.config["mode"] == SelectSelectorMode.LIST
+    assert selector.config["multiple"] is True
+
+
 def _assert_form_serializes(result: Any) -> None:
     """Serialize a form's schema the way the flow API sends it to the frontend."""
     assert probatio.to_field_list(

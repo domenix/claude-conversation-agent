@@ -346,7 +346,11 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                 {
                     probatio.Optional(CONF_PROMPT): TemplateSelector(),
                     probatio.Optional(CONF_LLM_HASS_API): SelectSelector(
-                        SelectSelectorConfig(options=hass_apis, multiple=True)
+                        SelectSelectorConfig(
+                            options=hass_apis,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
                     ),
                 }
             )
