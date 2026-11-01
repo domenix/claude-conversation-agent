@@ -1858,3 +1858,26 @@ async def test_brand_images_shipped(hass: HomeAssistant) -> None:
     brand = Path(integration.file_path) / "brand"
     for name in ("icon.png", "icon@2x.png", "dark_icon.png", "logo.png"):
         assert (brand / name).read_bytes().startswith(b"\x89PNG"), name
+
+
+
+async def test_run_sends_the_message_verbatim(hass: HomeAssistant) -> None:
+    """A message can't read files with "@path" or run a slash command.
+
+    The CLI would otherwise send the contents of "@/config/secrets.yaml" to the model,
+    even with code execution off.
+    """
+    from homeassistant.components import conversation
+
+    await _setup(hass, _entry())
+
+    seen: list[Any] = []
+    with patch(
+        "custom_components.claude.entity.query",
+        _fake_query([*_text_deltas("Hi"), ResultMessage()], seen),
+    ):
+        await conversation.async_converse(
+            hass, "hello", None, None, agent_id="conversation.claude_conversation"
+        )
+
+    assert seen[0].verbatim_prompts is True

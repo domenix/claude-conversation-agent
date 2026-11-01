@@ -229,6 +229,8 @@ class ClaudeAgent:
             # Never load rules from disk (~/.claude, project .claude); the turn
             # must be fully driven by what HA passes.
             setting_sources=[],
+            # A message can't read files with "@path" or run a slash command.
+            verbatim_prompts=True,
             include_partial_messages=True,
             permission_mode="bypassPermissions",
             max_turns=max_turns,
