@@ -58,11 +58,13 @@ MAX_TURNS = 50
 HA_SERVER_NAME = "ha"
 HA_TOOL_PREFIX = f"mcp__{HA_SERVER_NAME}__"
 
-# Claude built-in tools grouped by the subentry option that gates them.
+# Claude built-in tools are off unless a subentry option turns them on, so a tool
+# added by a new CLI release never reaches a conversation by accident.
+WEB_SEARCH_TOOL = "WebSearch"
+WEB_FETCH_TOOL = "WebFetch"
 # Task (subagent fan-out) and the code tools are unlocked together by the
 # "Code execution" option — subagents are only useful with tools to work with.
 CODE_TOOLS = ["Bash", "Write", "Edit", "Read", "Glob", "Grep", "NotebookEdit", "Task"]
-ALWAYS_DISALLOWED = ["TodoWrite", "KillShell", "BashOutput"]
 
 # A run with no timeout can hang forever if an upstream stream stalls; the
 # conversation framework would otherwise block a long time. Bound each run and

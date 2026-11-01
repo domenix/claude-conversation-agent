@@ -89,10 +89,13 @@ def _text_deltas(*chunks: str) -> list[StreamEvent]:
     ]
 
 
-def _fake_query(messages: list[Any]):
+def _fake_query(messages: list[Any], seen_options: list[Any] | None = None):
     """Return a patch target that yields the given messages from query()."""
 
     def _query(prompt: Any, options: Any) -> AsyncIterator[Any]:
+        if seen_options is not None:
+            seen_options.append(options)
+
         async def _gen() -> AsyncIterator[Any]:
             # Drain the streaming prompt so the caller's generator is exercised.
             async for _ in prompt:
@@ -572,6 +575,40 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
     for tool in tools:
         assert isinstance(tool["input_schema"], dict), tool["name"]
         assert tool["input_schema"]["type"] == "object", tool["name"]
+
+
+@pytest.mark.parametrize(
+    ("options", "tools"),
+    [
+        ({"recommended": True}, []),
+        ({"recommended": False, "web_search": True}, ["WebSearch"]),
+        ({"recommended": False, "web_fetch": True}, ["WebFetch"]),
+        (
+            {"recommended": False, "code_execution": True},
+            ["Bash", "Write", "Edit", "Read", "Glob", "Grep", "NotebookEdit", "Task"],
+        ),
+    ],
+    ids=["recommended", "web-search", "web-fetch", "code-execution"],
+)
+async def test_builtin_tools_come_from_options(
+    hass: HomeAssistant, options: dict[str, Any], tools: list[str]
+) -> None:
+    """Claude only gets the built-in tools the subentry options enable."""
+    from homeassistant.components import conversation
+
+    await _setup(hass, _entry(conversation_data=options))
+
+    seen: list[Any] = []
+    with patch(
+        "custom_components.claude.entity.query",
+        _fake_query([*_text_deltas("Hi"), ResultMessage()], seen),
+    ):
+        await conversation.async_converse(
+            hass, "hello", None, None, agent_id="conversation.claude_conversation"
+        )
+
+    assert seen[0].tools == tools
+    assert seen[0].disallowed_tools == []
 
 
 @pytest.mark.parametrize("error", [False, True])

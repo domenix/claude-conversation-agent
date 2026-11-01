@@ -18,7 +18,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .agent import ClaudeAgent, ClaudeAgentError, CredentialsInvalidError, query
 from .const import (
-    ALWAYS_DISALLOWED,
     CODE_TOOLS,
     CONF_CHAT_MODEL,
     CONF_CODE_EXECUTION,
@@ -35,6 +34,8 @@ from .const import (
     HA_TOOL_PREFIX,
     LOGGER,
     MAX_TURNS,
+    WEB_FETCH_TOOL,
+    WEB_SEARCH_TOOL,
 )
 from .coordinator import ClaudeCodeConfigEntry, ClaudeCodeCoordinator
 
@@ -321,17 +322,17 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
                 prompt += f"\n\nEarlier conversation with the user:\n{transcript}"
         return prompt
 
-    def _disallowed_tools(self) -> list[str]:
-        """Gate Claude built-in tools by the subentry options."""
+    def _builtin_tools(self) -> list[str]:
+        """Return the Claude built-in tools the subentry options enable."""
         options = DEFAULT | dict(self.subentry.data)
-        disallowed = list(ALWAYS_DISALLOWED)
-        if not options[CONF_WEB_SEARCH]:
-            disallowed.append("WebSearch")
-        if not options[CONF_WEB_FETCH]:
-            disallowed.append("WebFetch")
-        if not options[CONF_CODE_EXECUTION]:
-            disallowed.extend(CODE_TOOLS)
-        return disallowed
+        tools: list[str] = []
+        if options[CONF_WEB_SEARCH]:
+            tools.append(WEB_SEARCH_TOOL)
+        if options[CONF_WEB_FETCH]:
+            tools.append(WEB_FETCH_TOOL)
+        if options[CONF_CODE_EXECUTION]:
+            tools.extend(CODE_TOOLS)
+        return tools
 
     async def _build_prompt(
         self, chat_log: conversation.ChatLog, session_id: str | None
@@ -422,7 +423,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
             model=model,
             resume=session_id,
             system_prompt=self._build_system_prompt(chat_log, session_id),
-            disallowed_tools=self._disallowed_tools(),
+            builtin_tools=self._builtin_tools(),
             tool_server=tool_server,
             thinking_budget=options[CONF_THINKING_BUDGET],
             effort=effort if effort != "default" else None,
