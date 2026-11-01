@@ -3,6 +3,7 @@
 import asyncio
 import base64
 from collections.abc import AsyncIterator, Callable
+from contextlib import aclosing
 from mimetypes import guess_file_type
 from pathlib import Path
 from typing import Any
@@ -449,7 +450,11 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
             f", resume: {session_id}" if session_id else "",
         )
         try:
-            async with asyncio.timeout(run_timeout if run_timeout > 0 else None):
+            # Closing the SDK stream makes the CLI exit, however the run ends.
+            async with (
+                aclosing(messages),
+                asyncio.timeout(run_timeout if run_timeout > 0 else None),
+            ):
                 async for _content in chat_log.async_add_delta_content_stream(
                     self.entity_id, stream
                 ):

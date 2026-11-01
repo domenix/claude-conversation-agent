@@ -16,7 +16,7 @@ import pytest
 
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, issue_registry as ir
+from homeassistant.helpers import config_validation as cv, intent, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
 
@@ -609,6 +609,34 @@ async def test_builtin_tools_come_from_options(
 
     assert seen[0].tools == tools
     assert seen[0].disallowed_tools == []
+
+
+async def test_failed_run_closes_the_sdk_stream(hass: HomeAssistant) -> None:
+    """A run that stops early closes the SDK stream, which stops the CLI process."""
+    from homeassistant.components import conversation
+
+    await _setup(hass, _entry())
+
+    closed = False
+
+    def _query(prompt: Any, options: Any) -> AsyncIterator[Any]:
+        async def _gen() -> AsyncIterator[Any]:
+            nonlocal closed
+            try:
+                yield ResultMessage(is_error=True, subtype="error_during_execution")
+                yield ResultMessage()
+            finally:
+                closed = True
+
+        return _gen()
+
+    with patch("custom_components.claude.entity.query", _query):
+        result = await conversation.async_converse(
+            hass, "hello", None, None, agent_id="conversation.claude_conversation"
+        )
+        assert closed
+
+    assert result.response.response_type is intent.IntentResponseType.ERROR
 
 
 @pytest.mark.parametrize("error", [False, True])
