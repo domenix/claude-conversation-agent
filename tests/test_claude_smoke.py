@@ -16,6 +16,7 @@ import pytest
 
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, intent, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
@@ -609,6 +610,84 @@ async def test_builtin_tools_come_from_options(
 
     assert seen[0].tools == tools
     assert seen[0].disallowed_tools == []
+
+
+def _message_delta(stop_reason: str) -> StreamEvent:
+    return StreamEvent(
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop_reason},
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+    )
+
+
+async def _collect(messages: list[Any]) -> list[Any]:
+    """Run messages through the delta stream, as a conversation turn does."""
+    from custom_components.claude.entity import SDKDeltaStream
+
+    async def _gen() -> AsyncIterator[Any]:
+        for message in messages:
+            yield message
+
+    stream = SDKDeltaStream(MagicMock(), _gen(), lambda _: None)
+    return [delta async for delta in stream]
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "translation_key"),
+    [
+        ("max_tokens", "response_max_tokens"),
+        ("model_context_window_exceeded", "response_context_window_exceeded"),
+    ],
+)
+async def test_failed_run_names_the_limit_it_hit(
+    stop_reason: str, translation_key: str
+) -> None:
+    """The error names the limit, not the CLI's advice to set a variable."""
+    # The final result reports stop_sequence; only the stream has the real reason.
+    failed = ResultMessage(is_error=True)
+    failed.result = "API Error: set the CLAUDE_CODE_MAX_OUTPUT_TOKENS variable"
+    failed.stop_reason = "stop_sequence"
+
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await _collect([*_text_deltas("Partial"), _message_delta(stop_reason), failed])
+
+    assert excinfo.value.translation_key == translation_key
+
+
+async def test_run_recovered_from_a_limit_succeeds() -> None:
+    """The CLI retries a cut-off turn, so a limit alone is not a failure."""
+    deltas = await _collect(
+        [
+            _message_delta("max_tokens"),
+            *_text_deltas("Done"),
+            _message_delta("end_turn"),
+            ResultMessage(),
+        ]
+    )
+
+    assert {"content": "Done"} in deltas
+
+
+async def test_unrelated_failure_keeps_its_message() -> None:
+    """A failed run that hit no limit still reports the CLI's own message."""
+    failed = ResultMessage(is_error=True)
+    failed.result = "There's an issue with the selected model"
+
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await _collect([_message_delta("end_turn"), failed])
+
+    assert excinfo.value.translation_key == "run_error"
+    assert excinfo.value.translation_placeholders == {"message": failed.result}
+
+
+async def test_refusal_raises() -> None:
+    """A refused request is an error, not an empty or partial reply."""
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await _collect([*_text_deltas("Sorry"), _message_delta("refusal")])
+
+    assert excinfo.value.translation_key == "api_refusal"
 
 
 async def test_failed_run_closes_the_sdk_stream(hass: HomeAssistant) -> None:

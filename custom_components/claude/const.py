@@ -53,6 +53,15 @@ THINKING_EFFORT_OPTIONS = ["default", "low", "medium", "high", "xhigh", "max"]
 
 MAX_TURNS = 50
 
+# Why a failed run stopped, from the last message's stop reason. The CLI retries a
+# cut-off turn, so these only mean something once the run has failed. Its final
+# result says stop_sequence instead, and its own message tells the user to set an
+# environment variable.
+STOP_REASON_ERRORS = {
+    "max_tokens": "response_max_tokens",
+    "model_context_window_exceeded": "response_context_window_exceeded",
+}
+
 # In-process MCP server name; HA LLM tools are exposed to Claude as
 # mcp__ha__<tool_name> and executed in-process (no round-trip).
 HA_SERVER_NAME = "ha"

@@ -174,8 +174,17 @@
     }
   },
   "exceptions": {
+    "api_refusal": {
+      "message": "Claude declined to respond to this request."
+    },
     "not_authenticated": {
       "message": "Claude has no valid credentials. Re-authenticate the integration with an OAuth token or API key."
+    },
+    "response_context_window_exceeded": {
+      "message": "Claude reached the context window limit before completing the response. Start a new conversation."
+    },
+    "response_max_tokens": {
+      "message": "Claude reached the output token limit before completing the response. Raise the maximum tokens in the model settings."
     },
     "run_error": {
       "message": "Claude error: {message}."

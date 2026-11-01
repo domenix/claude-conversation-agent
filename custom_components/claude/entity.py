@@ -35,6 +35,7 @@ from .const import (
     HA_TOOL_PREFIX,
     LOGGER,
     MAX_TURNS,
+    STOP_REASON_ERRORS,
     WEB_FETCH_TOOL,
     WEB_SEARCH_TOOL,
 )
@@ -102,6 +103,7 @@ class SDKDeltaStream:
         self._need_role = True
         self._claude_tool_names: dict[str, str] = {}
         self.result_error: str | None = None
+        self.stop_reason: str | None = None
         self.structured_output: Any = None
 
     def __aiter__(
@@ -166,6 +168,12 @@ class SDKDeltaStream:
                         }
                     }
                 )
+            if stop_reason := event.get("delta", {}).get("stop_reason"):
+                self.stop_reason = stop_reason
+            if stop_reason == "refusal":
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="api_refusal"
+                )
 
     async def _handle_assistant(
         self, message: Any
@@ -229,6 +237,10 @@ class SDKDeltaStream:
             self.result_error = str(
                 getattr(message, "result", None) or message.subtype
             )
+            if translation_key := STOP_REASON_ERRORS.get(self.stop_reason or ""):
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key=translation_key
+                )
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="run_error",
