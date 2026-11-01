@@ -768,6 +768,44 @@ def test_reconcile_model_options(
     assert {key: options[key] for key in expected} == expected
 
 
+@pytest.mark.parametrize(
+    "messages",
+    [
+        [
+            AssistantMessage([ToolUseBlock("call-1", "StructuredOutput", {"fruit": "Apple"})]),
+            UserMessage([ToolResultBlock("call-1", "Structured output provided")]),
+            ResultMessage(structured_output={"fruit": "Apple"}),
+        ],
+        [
+            *_text_deltas('{"fruit": "Apple"}'),
+            ResultMessage(),
+        ],
+    ],
+    ids=["structured-output-tool", "json-text"],
+)
+async def test_ai_task_returns_structured_data(
+    hass: HomeAssistant, messages: list[Any]
+) -> None:
+    """Claude answers through a tool with no reply text, which is still an answer."""
+    await _setup(hass, _entry())
+
+    with patch("custom_components.claude.entity.query", _fake_query(messages)):
+        result = await hass.services.async_call(
+            "ai_task",
+            "generate_data",
+            {
+                "entity_id": "ai_task.claude_ai_task",
+                "task_name": "test",
+                "instructions": "Give me one fruit.",
+                "structure": {"fruit": {"selector": {"text": {}}}},
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert result["data"] == {"fruit": "Apple"}
+
+
 async def test_ai_tools_show_as_a_checkbox_list(hass: HomeAssistant) -> None:
     """The AI tools field lists every option as a checkbox."""
     from homeassistant.helpers.selector import SelectSelectorMode

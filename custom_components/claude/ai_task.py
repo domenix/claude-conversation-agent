@@ -58,6 +58,13 @@ class ClaudeCodeTaskEntity(
             chat_log, task.name, task.structure
         )
 
+        # Claude answers a structure through a tool, often with no reply text.
+        if task.structure and structured_output is not None:
+            return ai_task.GenDataTaskResult(
+                conversation_id=chat_log.conversation_id,
+                data=structured_output,
+            )
+
         if not isinstance(chat_log.content[-1], conversation.AssistantContent):
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="response_not_found"
@@ -69,11 +76,6 @@ class ClaudeCodeTaskEntity(
             return ai_task.GenDataTaskResult(
                 conversation_id=chat_log.conversation_id,
                 data=text,
-            )
-        if structured_output is not None:
-            return ai_task.GenDataTaskResult(
-                conversation_id=chat_log.conversation_id,
-                data=structured_output,
             )
         try:
             data = json_loads(_JSON_FENCE.sub("", text).strip())
