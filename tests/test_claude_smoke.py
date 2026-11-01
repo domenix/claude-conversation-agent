@@ -12,8 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
+from multidict import CIMultiDict, CIMultiDictProxy
 import probatio
 import pytest
+from yarl import URL
 
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
@@ -202,6 +204,29 @@ async def test_setup_creates_entities(hass: HomeAssistant) -> None:
 
     assert hass.states.get("conversation.claude_conversation") is not None
     assert hass.states.get("ai_task.claude_ai_task") is not None
+
+
+def _http_error(status: int = 500) -> aiohttp.ClientResponseError:
+    """Return an HTTP error carrying its request headers, as aiohttp raises it."""
+    url = URL(MODELS_URL)
+    headers = CIMultiDictProxy(CIMultiDict({"Authorization": "Bearer sk-ant-oat01-secret"}))
+    return aiohttp.ClientResponseError(
+        aiohttp.RequestInfo(url, "GET", headers, url), (), status=status
+    )
+
+
+async def test_failed_model_list_keeps_credentials_out_of_the_log(
+    hass: HomeAssistant,
+    mock_models_api: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An HTTP error's repr has the request's token, so it can't be logged."""
+    mock_models_api.clear_requests()
+    mock_models_api.get(MODELS_URL, exc=_http_error())
+    await _setup(hass, _entry())
+
+    assert "Could not fetch the Claude model list" in caplog.text
+    assert "sk-ant-" not in caplog.text
 
 
 def _model_ids(models: list[Any]) -> list[str]:

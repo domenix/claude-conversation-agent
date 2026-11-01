@@ -191,7 +191,8 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
         try:
             fetched = await self.agent.async_list_models()
         except (aiohttp.ClientError, TimeoutError, KeyError, TypeError) as err:
-            LOGGER.warning("Could not fetch the Claude model list: %r", err)
+            # Not %r: an HTTP error's repr includes the request's token.
+            LOGGER.warning("Could not fetch the Claude model list: %s", err)
             return None
         if not fetched:
             LOGGER.warning("The Claude model list came back empty")

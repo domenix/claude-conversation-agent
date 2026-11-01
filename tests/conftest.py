@@ -7,6 +7,7 @@ in ``pytest_homeassistant_custom_component`` so the same file runs either way.
 """
 
 from collections.abc import Iterator
+import logging
 import sys
 import types
 
@@ -42,6 +43,20 @@ def pytest_configure(config: object) -> None:
 def pytest_sessionstart(session: object) -> None:
     """Import the integration so its package exposes it by attribute."""
     import custom_components.claude  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def fail_on_logged_credentials(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
+    """Fail a test when the integration writes a credential to the log."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.claude")
+    yield
+    leaks = [
+        record.name
+        for when in ("setup", "call")
+        for record in caplog.get_records(when)
+        if "sk-ant-" in record.getMessage()
+    ]
+    assert not leaks
 
 
 @pytest.fixture(autouse=True)
