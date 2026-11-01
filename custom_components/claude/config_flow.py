@@ -143,8 +143,7 @@ class ClaudeCodeConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
     MINOR_VERSION = 2
 
-    _oauth_url: str = ""
-    _oauth_verifier: str = ""
+    _oauth_login: oauth.OAuthLogin
 
     async def _async_validate_and_create(
         self, user_input: dict[str, Any], step_id: str
@@ -237,7 +236,7 @@ class ClaudeCodeConfigFlow(ConfigFlow, domain=DOMAIN):
                 issued = await oauth.async_exchange_code(
                     async_get_clientsession(self.hass),
                     user_input[CONF_CODE],
-                    self._oauth_verifier,
+                    self._oauth_login,
                 )
             except oauth.OAuthError:
                 _LOGGER.exception("OAuth token exchange failed")
@@ -252,13 +251,12 @@ class ClaudeCodeConfigFlow(ConfigFlow, domain=DOMAIN):
                     data[CONF_OAUTH_EXPIRES_AT] = issued.expires_at.isoformat()
                 return await self._async_validate_and_create(data, "manual")
 
-        # (Re)build the authorize URL on entry and after an error; the verifier
-        # stays valid, so the same link yields a fresh code to retry with.
-        self._oauth_url, self._oauth_verifier = oauth.build_login()
+        # A new link on entry and after an error, which replaces the one shown before.
+        self._oauth_login = oauth.build_login()
         return self.async_show_form(
             step_id="oauth",
             data_schema=probatio.Schema({probatio.Required(CONF_CODE): str}),
-            description_placeholders={"url": self._oauth_url},
+            description_placeholders={"url": self._oauth_login.url},
             errors=errors or None,
         )
 

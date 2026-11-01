@@ -42,6 +42,15 @@ class OAuthToken:
     expires_at: datetime | None
 
 
+@dataclass(slots=True, frozen=True)
+class OAuthLogin:
+    """A login in progress: the link to open, and what completes it."""
+
+    url: str
+    verifier: str
+    state: str
+
+
 def _pkce_pair() -> tuple[str, str]:
     """Return a (verifier, challenge) PKCE pair (S256)."""
     verifier = secrets.token_urlsafe(32)
@@ -50,13 +59,15 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def build_login() -> tuple[str, str]:
-    """Build the authorize URL. Returns (url, verifier).
+def build_login() -> OAuthLogin:
+    """Start a login.
 
-    The verifier doubles as the OAuth ``state`` and must be kept to complete the
-    exchange.
+    The verifier stays here until the exchange. ``state`` is separate because it
+    travels in the link and comes back with the code, and whoever holds the code and
+    the verifier can redeem the code.
     """
     verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(32)
     params = {
         "code": "true",
         "client_id": CLIENT_ID,
@@ -65,26 +76,28 @@ def build_login() -> tuple[str, str]:
         "scope": SCOPES,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
-        "state": verifier,
+        "state": state,
     }
-    return f"{AUTHORIZE_URL}?{urlencode(params)}", verifier
+    return OAuthLogin(f"{AUTHORIZE_URL}?{urlencode(params)}", verifier, state)
 
 
 async def async_exchange_code(
-    session: aiohttp.ClientSession, code_input: str, verifier: str
+    session: aiohttp.ClientSession, code_input: str, login: OAuthLogin
 ) -> OAuthToken:
     """Exchange the pasted ``code#state`` for a token. Raises OAuthError."""
     code_input = "".join(code_input.split())
     code, _, state = code_input.partition("#")
     if not code:
         raise OAuthError("empty authorization code")
+    if state and state != login.state:
+        raise OAuthError("the code comes from a different login")
     body = {
         "grant_type": "authorization_code",
         "code": code,
-        "state": state or verifier,
+        "state": login.state,
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
-        "code_verifier": verifier,
+        "code_verifier": login.verifier,
         "expires_in": TOKEN_LIFETIME_S,
     }
     try:

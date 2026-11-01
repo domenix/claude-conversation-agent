@@ -4,8 +4,10 @@ See tests/README.md for how to run them. The Claude Agent SDK is never really
 invoked; ``async_verify`` and ``query`` are patched with fakes.
 """
 
+import base64
 from collections.abc import AsyncIterator, Generator
 from datetime import UTC, datetime, timedelta
+import hashlib
 import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -981,7 +983,9 @@ async def test_exchange_requests_token_lifetime(
         },
     )
     issued = await oauth.async_exchange_code(
-        async_get_clientsession(hass), "the-code#the-state", "the-verifier"
+        async_get_clientsession(hass),
+        "the-code#the-state",
+        oauth.OAuthLogin("https://url", "the-verifier", "the-state"),
     )
 
     body = aioclient_mock.mock_calls[0][2]
@@ -998,13 +1002,93 @@ def test_login_url() -> None:
     """The authorize URL carries the PKCE challenge and the scope."""
     from custom_components.claude import oauth
 
-    url, verifier = oauth.build_login()
+    login = oauth.build_login()
 
-    assert url.startswith(f"{oauth.AUTHORIZE_URL}?")
-    query = parse_qs(urlparse(url).query)
+    assert login.url.startswith(f"{oauth.AUTHORIZE_URL}?")
+    query = parse_qs(urlparse(login.url).query)
     assert query["scope"] == [oauth.SCOPES]
-    assert query["state"] == [verifier]
+    assert query["state"] == [login.state]
     assert query["code_challenge_method"] == ["S256"]
+
+
+def test_login_url_keeps_the_verifier_secret() -> None:
+    """The link and the code pasted back must not be enough to redeem the code."""
+    from custom_components.claude import oauth
+
+    login = oauth.build_login()
+
+    assert login.state != login.verifier
+    assert login.verifier not in login.url
+    digest = hashlib.sha256(login.verifier.encode()).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    assert parse_qs(urlparse(login.url).query)["code_challenge"] == [challenge]
+
+
+@pytest.mark.parametrize("code_input", ["the-code#the-state", "the-code"])
+async def test_exchange_sends_the_login_state(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, code_input: str
+) -> None:
+    """A code pasted with or without its state completes the login it came from."""
+    from custom_components.claude import oauth
+
+    aioclient_mock.post(oauth.TOKEN_URL, json={"access_token": "sk-ant-oat01-secret"})
+
+    await oauth.async_exchange_code(
+        async_get_clientsession(hass),
+        code_input,
+        oauth.OAuthLogin("https://url", "the-verifier", "the-state"),
+    )
+
+    assert aioclient_mock.mock_calls[0][2]["state"] == "the-state"
+
+
+async def test_oauth_flow_rejects_a_code_from_another_login(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """A code from another login is refused without reaching Anthropic."""
+    from custom_components.claude import oauth
+
+    aioclient_mock.post(oauth.TOKEN_URL, json={"access_token": "sk-ant-oat01-secret"})
+    assert await async_setup_component(hass, "homeassistant", {})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "oauth"}
+    )
+    calls_before = aioclient_mock.call_count
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"code": "the-code#someone-elses-state"}
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "oauth_failed"}
+    assert aioclient_mock.call_count == calls_before
+
+
+async def test_oauth_flow_completes_with_the_code_from_its_link(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """The state on the shown link is the one a pasted code has to carry."""
+    from custom_components.claude import oauth
+
+    aioclient_mock.post(oauth.TOKEN_URL, json={"access_token": "sk-ant-oat01-secret"})
+    assert await async_setup_component(hass, "homeassistant", {})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "oauth"}
+    )
+    state = parse_qs(urlparse(result["description_placeholders"]["url"]).query)["state"][0]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"code": f"the-code#{state}"}
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["oauth_token"] == "sk-ant-oat01-secret"
 
 
 @pytest.mark.parametrize(
