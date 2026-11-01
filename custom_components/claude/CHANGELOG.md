@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.0
+
+- Keep the login's PKCE verifier out of the login link and the code you paste back, so
+  seeing that code is no longer enough to redeem it. Refuse a code from a different
+  login. Reported by [@mattabate](https://github.com/mattabate).
+- Keep the Claude token out of the log: if a warning said "Could not fetch the Claude
+  model list", log in again to replace it. Say that code execution has no sandbox and
+  reaches your passwords and tokens, and warn in Repairs while it's on.
+- Recognize a rejected API key during setup. Ask to log in again when a conversation or
+  AI task finds the credentials rejected, and stop asking for new credentials when an
+  account is out of credit; setup retries until it's topped up. Reported by
+  [@mattabate](https://github.com/mattabate) in
+  [#1](https://github.com/domenix/claude-conversation-agent/issues/1).
+- List models live from Anthropic, warn in Repairs when an agent uses a deprecated one,
+  ask for the model first and show only the options it supports, separate the thinking
+  type from the effort (saved agents migrate and keep their behavior), and rename
+  "Control Home Assistant" to "AI tools" as a checkbox list.
+- Give Claude only the built-in tools the options enable, send it a tool's own data,
+  flag failed tools as errors, and stop the `tool_result` deprecation warning. Say when
+  a reply hit the output or context limit, report refused requests as errors, and fix
+  the "Last content in chat log is not an AssistantContent" failure on AI tasks with a
+  structure. Stop the Claude CLI within seconds when a run ends early, add the
+  integration's icon and logo, and add cache usage, the stop reason, the message ID and
+  failed tools to the conversation trace.
+
 ## 1.0.2
 
 - Keep transient network failures retryable during setup. Previously a Home
