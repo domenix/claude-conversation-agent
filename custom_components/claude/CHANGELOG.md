@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Update the Claude Agent SDK to 0.2.176 and the Claude Code CLI to 2.1.316. The CLI
+  download grows to about 310 MB.
+- Allow `mcp` 2.x, as the SDK now does and Home Assistant 2026.11 requires. A custom
+  integration that still needs 1.x has to pin it itself.
+
 ## 1.1.0
 
 - Keep the login's PKCE verifier out of the login link and the code you paste back, so

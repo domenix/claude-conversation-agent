@@ -20,7 +20,7 @@
     "claude_agent_sdk"
   ],
   "requirements": [
-    "claude-agent-sdk==0.2.119"
+    "claude-agent-sdk==0.2.176"
   ],
   "version": "1.1.0"
 }

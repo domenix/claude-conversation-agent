@@ -29,7 +29,7 @@ your Claude subscription
 
 **Settings → Devices & services → Add integration → Claude.** The first time
 you submit credentials, the integration downloads the Claude Code CLI matching
-your platform (~250 MB, cached under `/config`), so allow a few minutes. Then
+your platform (~310 MB, cached under `/config`), so allow a few minutes. Then
 pick one of:
 
 ### Log in with Claude (recommended)
@@ -94,7 +94,7 @@ changed via **Reconfigure** or the reauth prompt.
   exhausted, requests fail until it resets (or configure an API key).
 - The CLI is fetched for your platform (`linux-arm64`/`linux-x64`, glibc or
   musl) from Anthropic's release server on first setup; it needs outbound
-  internet and ~250 MB free under `/config`.
+  internet and ~310 MB free under `/config`.
 - Code execution has no sandbox. It runs with Home Assistant's own rights, which is
   root on Home Assistant OS, so it can read and change everything, including your
   passwords and tokens. Anyone who can talk to the agent, or any text it reads, could
