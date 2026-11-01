@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
 
 - Stop a message from reading files with `@path`, such as `@/config/secrets.yaml`, or
   running a slash command. This worked even with code execution off.
