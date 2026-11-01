@@ -6,8 +6,6 @@ Tasks on your Claude subscription. It drives the Claude Agent SDK in-process
 service.
 """
 
-from __future__ import annotations
-
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv

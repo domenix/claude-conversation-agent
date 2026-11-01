@@ -7,15 +7,16 @@ invoked; ``async_verify`` and ``query`` are patched with fakes.
 from collections.abc import AsyncIterator, Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
+import probatio
 import pytest
 
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
 
@@ -50,7 +51,7 @@ class ToolResultBlock:
     def __init__(self, tool_use_id: str, content: Any) -> None:
         self.tool_use_id = tool_use_id
         self.content = content
-        self.is_error = False
+        self.is_error: bool | None = False
 
 
 class AssistantMessage:
@@ -288,6 +289,24 @@ async def test_models_fall_back_to_builtin_list(
     assert entry.runtime_data.data == MODELS
 
 
+def _assert_form_serializes(result: Any) -> None:
+    """Serialize a form's schema the way the flow API sends it to the frontend."""
+    assert probatio.to_field_list(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+
+
+def test_credentials_form_serializes() -> None:
+    """The credentials form reaches the frontend with both of its fields."""
+    from custom_components.claude.config_flow import STEP_USER_DATA_SCHEMA
+
+    fields = probatio.to_field_list(
+        STEP_USER_DATA_SCHEMA, custom_serializer=cv.custom_serializer
+    )
+
+    assert {field["name"] for field in fields} == {"oauth_token", "api_key"}
+
+
 async def test_model_options_refetch_and_keep_list_on_failure(
     hass: HomeAssistant, mock_models_api: AiohttpClientMocker
 ) -> None:
@@ -305,10 +324,12 @@ async def test_model_options_refetch_and_keep_list_on_failure(
             (entry.entry_id, "conversation"),
             context={"source": "reconfigure", "subentry_id": subentry_id},
         )
+        _assert_form_serializes(result)
         result = await hass.config_entries.subentries.async_configure(
             result["flow_id"], {"recommended": False}
         )
         assert result["step_id"] == "model"
+        _assert_form_serializes(result)
         selector = next(
             value
             for key, value in result["data_schema"].schema.items()
@@ -545,8 +566,7 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
         )
 
     assert result.response.speech["plain"]["speech"] == "Done"
-    # Every HA tool must reach the SDK as a JSON Schema object, whichever schema
-    # library this Home Assistant version describes its tools with.
+    # Every HA tool must reach the SDK as a JSON Schema object.
     tools = build_tool_server.call_args.args[1]
     assert tools
     for tool in tools:
@@ -554,18 +574,62 @@ async def test_conversation_ha_tool(hass: HomeAssistant) -> None:
         assert tool["input_schema"]["type"] == "object", tool["name"]
 
 
+@pytest.mark.parametrize("error", [False, True])
+async def test_ha_tool_handler_unwraps_tool_result(error: bool) -> None:
+    """Claude gets the tool's own data, with a failed tool flagged as an error."""
+    from homeassistant.helpers import llm
+    from homeassistant.util.json import json_loads
+
+    from custom_components.claude.agent import ClaudeAgent
+
+    data = {"speech": "Turned on the light"}
+    llm_api = MagicMock()
+    llm_api.async_call_tool = AsyncMock(
+        return_value=llm.ToolResult(data=data, error=error)
+    )
+    handler = ClaudeAgent._make_handler(MagicMock(), "intent__HassTurnOn", llm_api, 5)
+
+    result = await handler({})
+
+    assert json_loads(result["content"][0]["text"]) == data
+    assert result.get("is_error", False) is error
+
+
+@pytest.mark.parametrize(("is_error", "error"), [(None, False), (True, True)])
+async def test_tool_result_delta_uses_tool_result(
+    is_error: bool | None, error: bool
+) -> None:
+    """A tool result reaches the chat log as a ToolResult, keeping its error flag."""
+    from homeassistant.helpers import llm
+
+    from custom_components.claude.entity import SDKDeltaStream
+
+    block = ToolResultBlock("call-1", "some context")
+    block.is_error = is_error
+    stream = SDKDeltaStream(MagicMock(), MagicMock(), lambda _: None)
+
+    deltas = [delta async for delta in stream._handle_user(UserMessage([block]))]
+
+    assert deltas == [
+        {
+            "role": "tool_result",
+            "tool_call_id": "call-1",
+            "tool_name": "unknown",
+            "result": llm.ToolResult(data={"content": "some context"}, error=error),
+        }
+    ]
+
+
 def test_structured_output_schema_is_json_schema() -> None:
     """An AI Task structure converts to a JSON Schema object."""
-    import voluptuous as vol
-
     from homeassistant.helpers import llm, selector
 
     from custom_components.claude.entity import _to_json_schema
 
-    structure = vol.Schema(
+    structure = probatio.Schema(
         {
-            vol.Required("answer"): selector.TextSelector(),
-            vol.Optional("count"): selector.NumberSelector(),
+            probatio.Required("answer"): selector.TextSelector(),
+            probatio.Optional("count"): selector.NumberSelector(),
         }
     )
     schema = _to_json_schema(structure, llm.selector_serializer)

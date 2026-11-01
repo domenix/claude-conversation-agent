@@ -1,12 +1,10 @@
 """Config flow for the Claude integration."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 import logging
 from typing import Any, override
 
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
@@ -67,10 +65,10 @@ CONF_CODE = "code"
 
 _PASSWORD = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+STEP_USER_DATA_SCHEMA = probatio.Schema(
     {
-        vol.Optional(CONF_OAUTH_TOKEN): _PASSWORD,
-        vol.Optional(CONF_API_KEY): _PASSWORD,
+        probatio.Optional(probatio.Secret(CONF_OAUTH_TOKEN)): _PASSWORD,
+        probatio.Optional(probatio.Secret(CONF_API_KEY)): _PASSWORD,
     }
 )
 
@@ -248,7 +246,7 @@ class ClaudeCodeConfigFlow(ConfigFlow, domain=DOMAIN):
         self._oauth_url, self._oauth_verifier = oauth.build_login()
         return self.async_show_form(
             step_id="oauth",
-            data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
+            data_schema=probatio.Schema({probatio.Required(CONF_CODE): str}),
             description_placeholders={"url": self._oauth_url},
             errors=errors or None,
         )
@@ -329,20 +327,20 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                 default_name = DEFAULT_AI_TASK_NAME
             else:
                 default_name = DEFAULT_CONVERSATION_NAME
-            step_schema[vol.Required(CONF_NAME, default=default_name)] = str
+            step_schema[probatio.Required(CONF_NAME, default=default_name)] = str
 
         if self._subentry_type == "conversation":
             step_schema.update(
                 {
-                    vol.Optional(CONF_PROMPT): TemplateSelector(),
-                    vol.Optional(CONF_LLM_HASS_API): SelectSelector(
+                    probatio.Optional(CONF_PROMPT): TemplateSelector(),
+                    probatio.Optional(CONF_LLM_HASS_API): SelectSelector(
                         SelectSelectorConfig(options=hass_apis, multiple=True)
                     ),
                 }
             )
 
         step_schema[
-            vol.Required(
+            probatio.Required(
                 CONF_RECOMMENDED, default=self.options.get(CONF_RECOMMENDED, False)
             )
         ] = bool
@@ -374,7 +372,7 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(step_schema), self.options
+                probatio.Schema(step_schema), self.options
             ),
         )
 
@@ -385,7 +383,7 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
         errors: dict[str, str] = {}
 
         step_schema: VolDictType = {
-            vol.Optional(
+            probatio.Optional(
                 CONF_CHAT_MODEL,
                 default=DEFAULT[CONF_CHAT_MODEL],
             ): SelectSelector(
@@ -397,18 +395,18 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                     custom_value=True,
                 )
             ),
-            vol.Optional(
+            probatio.Optional(
                 CONF_MAX_TOKENS,
                 default=DEFAULT[CONF_MAX_TOKENS],
             ): cv.positive_int,
-            vol.Optional(
+            probatio.Optional(
                 CONF_THINKING_BUDGET,
                 default=DEFAULT[CONF_THINKING_BUDGET],
-            ): vol.All(
+            ): probatio.All(
                 NumberSelector(NumberSelectorConfig(min=0, max=64000)),
-                vol.Coerce(int),
+                probatio.Coerce(int),
             ),
-            vol.Optional(
+            probatio.Optional(
                 CONF_THINKING_EFFORT,
                 default=DEFAULT[CONF_THINKING_EFFORT],
             ): SelectSelector(
@@ -418,32 +416,32 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional(
+            probatio.Optional(
                 CONF_CODE_EXECUTION,
                 default=DEFAULT[CONF_CODE_EXECUTION],
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 CONF_WEB_SEARCH,
                 default=DEFAULT[CONF_WEB_SEARCH],
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 CONF_WEB_SEARCH_USER_LOCATION,
                 default=DEFAULT[CONF_WEB_SEARCH_USER_LOCATION],
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 CONF_WEB_FETCH,
                 default=DEFAULT[CONF_WEB_FETCH],
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 CONF_SHOW_ACTIVITY,
                 default=DEFAULT[CONF_SHOW_ACTIVITY],
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 CONF_RUN_TIMEOUT,
                 default=DEFAULT[CONF_RUN_TIMEOUT],
-            ): vol.All(
+            ): probatio.All(
                 NumberSelector(NumberSelectorConfig(min=0, max=1800)),
-                vol.Coerce(int),
+                probatio.Coerce(int),
             ),
         }
 
@@ -472,7 +470,7 @@ class LLMSubentryFlowHandler(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="model",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(step_schema), self.options
+                probatio.Schema(step_schema), self.options
             ),
             errors=errors or None,
             last_step=True,

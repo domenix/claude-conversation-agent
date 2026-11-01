@@ -1,10 +1,8 @@
 """Diagnostics support for Claude."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components.diagnostics import async_redact_data, entity_entry_as_dict
 from homeassistant.const import CONF_PROMPT
 from homeassistant.helpers import entity_registry as er
 
@@ -42,7 +40,7 @@ async def async_get_config_entry_diagnostics(
             for subentry in entry.subentries.values()
         },
         "entities": {
-            entity_entry.entity_id: entity_entry.extended_dict
+            entity_entry.entity_id: entity_entry_as_dict(entity_entry)
             for entity_entry in er.async_entries_for_config_entry(
                 er.async_get(hass), entry.entry_id
             )

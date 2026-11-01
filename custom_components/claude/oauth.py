@@ -4,8 +4,6 @@ The user opens the authorize URL, approves, and pastes the returned
 ``code#state`` back into the config flow, which exchanges it for a token.
 """
 
-from __future__ import annotations
-
 import base64
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta

@@ -7,8 +7,6 @@ exposed to the model through an in-process SDK MCP server and executed directly
 via the conversation's LLM API.
 """
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -180,14 +178,14 @@ class ClaudeAgent:
                     if tool_timeout > 0
                     else await call
                 )
-                text = json_dumps(result)
+                text = json_dumps(result.data)
             except TimeoutError:
                 LOGGER.warning("HA tool %s timed out after %ss", tool_name, tool_timeout)
                 return _error(f"Tool '{tool_name}' did not respond within {tool_timeout}s")
             except Exception as err:  # noqa: BLE001 - surface to the model, not a crash
                 LOGGER.warning("HA tool %s failed: %s", tool_name, err)
                 return _error(str(err))
-            return {"content": [{"type": "text", "text": text}]}
+            return {"content": [{"type": "text", "text": text}], "is_error": result.error}
 
         return handler
 

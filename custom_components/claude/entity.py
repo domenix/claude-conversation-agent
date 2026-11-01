@@ -1,7 +1,5 @@
 """Base entity for Claude."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 from collections.abc import AsyncIterator, Callable
@@ -9,14 +7,7 @@ from mimetypes import guess_file_type
 from pathlib import Path
 from typing import Any
 
-import voluptuous as vol
-
-# Home Assistant before 2026.9 converts schemas with voluptuous-openapi.
-try:
-    from probatio import to_openapi as _probatio_to_openapi
-except ImportError:
-    _probatio_to_openapi = None
-    from voluptuous_openapi import convert as _voluptuous_convert
+import probatio
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigSubentry
@@ -51,17 +42,10 @@ from .coordinator import ClaudeCodeConfigEntry, ClaudeCodeCoordinator
 def _to_json_schema(
     schema: Any, custom_serializer: Callable[[Any], Any] | None
 ) -> dict[str, Any]:
-    """Convert an HA schema (tool parameters, AI Task structure) to JSON Schema.
-
-    Home Assistant 2026.9 replaced voluptuous-openapi with probatio, and 2026.10
-    describes LLM tools as probatio schemas, which voluptuous-openapi's convert()
-    turns into probatio's UNSUPPORTED marker instead of a dict.
-    """
-    if _probatio_to_openapi is not None:
-        return _probatio_to_openapi(
-            schema, custom_serializer=custom_serializer, openapi_version="3.1.0"
-        )
-    return _voluptuous_convert(schema, custom_serializer=custom_serializer)
+    """Convert an HA schema (tool parameters, AI Task structure) to JSON Schema."""
+    return probatio.to_openapi(
+        schema, custom_serializer=custom_serializer, openapi_version="3.1.0"
+    )
 
 
 def _format_tool(
@@ -228,7 +212,10 @@ class SDKDeltaStream:
                 "tool_name": _strip_prefix(
                     self._claude_tool_names.get(block.tool_use_id, "unknown")
                 ),
-                "tool_result": {"content": _stringify(block.content)},
+                "result": llm.ToolResult(
+                    data={"content": _stringify(block.content)},
+                    error=bool(block.is_error),
+                ),
             }
             self._need_role = True
 
@@ -394,7 +381,7 @@ class ClaudeCodeBaseLLMEntity(CoordinatorEntity[ClaudeCodeCoordinator]):
         self,
         chat_log: conversation.ChatLog,
         structure_name: str | None = None,
-        structure: vol.Schema | None = None,
+        structure: probatio.Schema | None = None,
     ) -> Any:
         """Generate an answer for the chat log with the in-process agent.
 

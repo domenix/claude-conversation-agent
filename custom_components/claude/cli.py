@@ -8,8 +8,6 @@ The version is taken from the installed SDK (``_cli_version``) so the CLI and
 SDK always match. Downloads are checksum-verified against the release manifest.
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import json
