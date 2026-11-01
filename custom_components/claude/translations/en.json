@@ -209,6 +209,10 @@
     }
   },
   "issues": {
+    "model_deprecated": {
+      "title": "Claude model going away",
+      "description": "Anthropic has deprecated the model used by: {agents}. It keeps working until it retires, then those agents stop responding.\n\nGo to Settings > Devices & services > Claude, reconfigure each one, and pick another model or turn on the recommended settings."
+    },
     "oauth_token_expiring": {
       "title": "Claude login expires soon",
       "description": "The Claude login used by {name} expires on {expires_at} ({days} days from now). When it does, conversations and AI tasks will stop working with an authentication error.\n\nGo to Settings > Devices & services > Claude, select Reconfigure, and log in with Claude again."

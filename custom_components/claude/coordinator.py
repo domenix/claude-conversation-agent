@@ -15,17 +15,20 @@ from homeassistant.util import dt as dt_util
 from .agent import ClaudeAgent, ClaudeAgentError, CredentialsInvalidError
 from .const import (
     CONF_API_KEY,
+    CONF_CHAT_MODEL,
     CONF_OAUTH_EXPIRES_AT,
     CONF_OAUTH_TOKEN,
     DEFAULT_RUN_TIMEOUT_S,
     DEFAULT_TOOL_TIMEOUT_S,
     DOMAIN,
+    ISSUE_MODEL_DEPRECATED,
     ISSUE_TOKEN_EXPIRED,
     ISSUE_TOKEN_EXPIRING,
     LOGGER,
     MODEL_DEFAULT,
+    MODEL_DEPRECATIONS_URL,
     MODELS,
-    TOKEN_EXPIRY_CHECK_INTERVAL,
+    PERIODIC_CHECK_INTERVAL,
     TOKEN_EXPIRY_WARNING,
     Model,
 )
@@ -33,12 +36,26 @@ from .const import (
 type ClaudeCodeConfigEntry = ConfigEntry[ClaudeCodeCoordinator]
 
 
+def _model_alias(model_id: str) -> str:
+    """Resolve the alias of a dated model ID."""
+    model, _, version = model_id.rpartition("-")
+    return model if len(version) == 8 and version.isdecimal() else model_id
+
+
+def _find_model(models: list[Model], model_id: str) -> Model | None:
+    """Find a model by its ID, or else by its alias."""
+    alias = _model_alias(model_id)
+    return next((model for model in models if model.id == model_id), None) or next(
+        (model for model in models if _model_alias(model.id) == alias), None
+    )
+
+
 class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
     """Owns the in-process agent, the session map and credential state.
 
-    No polling: credentials are verified and the model list fetched once at
-    setup (the list again whenever the model options are opened).
-    ``update_interval`` is left unset so nothing runs on a timer.
+    Credentials are verified once at setup. ``update_interval`` is left unset so
+    that doesn't repeat; a separate timer re-fetches the model list, which also
+    happens whenever the model options are opened.
     """
 
     config_entry: ClaudeCodeConfigEntry
@@ -69,16 +86,18 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
             self.config_entry.data.get(CONF_OAUTH_TOKEN, ""),
             self.config_entry.data.get(CONF_API_KEY, ""),
         )
-        # Warn before the token expires, rather than letting the first 401 be
-        # the notification.
+        # Warn before the token expires or a model retires, rather than letting
+        # the first failed run be the notification.
         self.config_entry.async_on_unload(
             async_track_time_interval(
                 self.hass,
-                self._async_expiry_tick,
-                TOKEN_EXPIRY_CHECK_INTERVAL,
+                self._async_periodic_check,
+                PERIODIC_CHECK_INTERVAL,
                 cancel_on_shutdown=True,
             )
         )
+        # Setup raises it again, so changing a subentry's model clears it.
+        self.config_entry.async_on_unload(self._async_delete_model_issue)
 
     @property
     def token_expires_at(self) -> datetime | None:
@@ -86,9 +105,10 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
         raw = self.config_entry.data.get(CONF_OAUTH_EXPIRES_AT)
         return dt_util.parse_datetime(raw) if raw else None
 
-    async def _async_expiry_tick(self, _now: datetime) -> None:
-        """Re-check the token expiry on a timer."""
+    async def _async_periodic_check(self, _now: datetime) -> None:
+        """Re-check the token expiry and the models' lifecycle on a timer."""
         self.async_check_token_expiry()
+        await self.async_refresh_models()
 
     @callback
     def async_check_token_expiry(self) -> None:
@@ -154,11 +174,15 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
                 translation_placeholders={"message": str(err)},
             ) from err
         self.async_check_token_expiry()
-        return await self._async_fetch_models() or list(MODELS)
+        models = await self._async_fetch_models()
+        if models:
+            self._async_check_model_lifecycle(models)
+        return models or list(MODELS)
 
     async def async_refresh_models(self) -> list[Model]:
         """Re-fetch the model list, keeping the current one if that fails."""
         if models := await self._async_fetch_models():
+            self._async_check_model_lifecycle(models)
             self.async_set_updated_data(models)
         return self.data or list(MODELS)
 
@@ -172,7 +196,53 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
         if not fetched:
             LOGGER.warning("The Claude model list came back empty")
             return None
+        LOGGER.debug(
+            "Available models: %s",
+            [(model.id, model.lifecycle, model.retires_at) for model in fetched],
+        )
         return [MODEL_DEFAULT, *fetched]
+
+    def _selected_models(self) -> list[tuple[str, str]]:
+        """Return (subentry title, model ID) for subentries using a specific model."""
+        return [
+            (subentry.title, model_id)
+            for subentry in self.config_entry.subentries.values()
+            if (model_id := subentry.data.get(CONF_CHAT_MODEL))
+            and model_id != MODEL_DEFAULT.id
+        ]
+
+    @callback
+    def _async_check_model_lifecycle(self, models: list[Model]) -> None:
+        """Raise or clear a repair issue about subentries' models going away."""
+        affected: list[str] = []
+        for title, model_id in self._selected_models():
+            model = _find_model(models, model_id)
+            if model and model.lifecycle == "deprecated":
+                details = model.display_name
+                if retires_at := dt_util.parse_datetime(model.retires_at or ""):
+                    details += f", until {retires_at.date().isoformat()}"
+                affected.append(f"{title} ({details})")
+
+        if not affected:
+            self._async_delete_model_issue()
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._issue_id(ISSUE_MODEL_DEPRECATED),
+            is_fixable=False,
+            learn_more_url=MODEL_DEPRECATIONS_URL,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_MODEL_DEPRECATED,
+            translation_placeholders={"agents": ", ".join(affected)},
+        )
+
+    @callback
+    def _async_delete_model_issue(self) -> None:
+        """Delete the repair issue about this entry's models."""
+        ir.async_delete_issue(
+            self.hass, DOMAIN, self._issue_id(ISSUE_MODEL_DEPRECATED)
+        )
 
     @callback
     def async_set_auth_failed(self) -> None:
@@ -182,9 +252,8 @@ class ClaudeCodeCoordinator(DataUpdateCoordinator[list[Model]]):
     @callback
     def get_model_info(self, model_id: str) -> Model:
         """Get model info for a given model ID."""
-        for model in self.data or MODELS:
-            if model.id == model_id:
-                return model
+        if model := _find_model(self.data or MODELS, model_id):
+            return model
         return Model(
             id=model_id,
             display_name="Account default" if model_id == "default" else model_id,

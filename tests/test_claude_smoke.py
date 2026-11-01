@@ -21,8 +21,9 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, intent, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
-from tests.common import MockConfigEntry
+from tests.common import MockConfigEntry, async_fire_time_changed
 from tests.test_util.aiohttp import AiohttpClientMocker
 
 DOMAIN = "claude"
@@ -292,6 +293,140 @@ async def test_models_fall_back_to_builtin_list(
 
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data.data == MODELS
+
+
+def _model_entry(model: str = "claude-old-8") -> MockConfigEntry:
+    return _entry(conversation_data={"recommended": False, "chat_model": model})
+
+
+def _model_issue(hass: HomeAssistant, entry: MockConfigEntry, name: str) -> Any:
+    return ir.async_get(hass).async_get_issue(DOMAIN, f"{name}_{entry.entry_id}")
+
+
+def _mock_models(mock: AiohttpClientMocker, *extra: dict[str, Any]) -> None:
+    """Answer the model list with one active model plus the given ones."""
+    mock.clear_requests()
+    mock.get(
+        MODELS_URL,
+        json={
+            "data": [
+                {"id": "claude-new-9", "display_name": "Claude New 9", "lifecycle": "active"},
+                *extra,
+            ],
+            "has_more": False,
+        },
+    )
+
+
+DEPRECATED_MODEL = {
+    "id": "claude-old-8",
+    "display_name": "Claude Old 8",
+    "lifecycle": "deprecated",
+    "retires_at": "2027-02-03T00:00:00Z",
+}
+
+
+async def test_deprecated_model_raises_a_warning(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """An agent on a deprecated model warns, naming the agent and the date."""
+    _mock_models(mock_models_api, DEPRECATED_MODEL)
+    entry = _model_entry()
+    await _setup(hass, entry)
+
+    issue = _model_issue(hass, entry, "model_deprecated")
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.translation_placeholders == {
+        "agents": "Claude conversation (Claude Old 8, until 2027-02-03)"
+    }
+
+
+@pytest.mark.parametrize(
+    "conversation_data",
+    [{"recommended": True}, {"recommended": False, "chat_model": "default"}],
+    ids=["recommended", "account-default"],
+)
+async def test_model_warning_ignores_account_default(
+    hass: HomeAssistant,
+    mock_models_api: AiohttpClientMocker,
+    conversation_data: dict[str, Any],
+) -> None:
+    """Without a specific model there is nothing to warn about."""
+    _mock_models(mock_models_api, DEPRECATED_MODEL)
+    entry = _entry(conversation_data=conversation_data)
+    await _setup(hass, entry)
+
+    assert _model_issue(hass, entry, "model_deprecated") is None
+
+
+async def test_model_warning_without_lifecycle_data(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """A response without lifecycle data raises nothing."""
+    entry = _model_entry()
+    await _setup(hass, entry)
+
+    assert _model_issue(hass, entry, "model_deprecated") is None
+
+
+async def test_model_warning_resolves_dated_ids(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """An alias finds the dated model the API lists."""
+    _mock_models(mock_models_api, DEPRECATED_MODEL | {"id": "claude-old-8-20250101"})
+    entry = _model_entry("claude-old-8")
+    await _setup(hass, entry)
+
+    assert _model_issue(hass, entry, "model_deprecated") is not None
+
+
+async def test_changing_the_model_clears_the_warning(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """Moving the agent to another model clears the warning."""
+    _mock_models(mock_models_api, DEPRECATED_MODEL)
+    entry = _model_entry()
+    await _setup(hass, entry)
+    assert _model_issue(hass, entry, "model_deprecated") is not None
+
+    subentry = next(
+        sub for sub in entry.subentries.values() if sub.subentry_type == "conversation"
+    )
+    hass.config_entries.async_update_subentry(
+        entry,
+        subentry,
+        data={"recommended": False, "chat_model": "claude-new-9"},
+    )
+    await hass.async_block_till_done()
+
+    assert _model_issue(hass, entry, "model_deprecated") is None
+
+
+async def test_model_warning_ignores_unknown_ids(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """A CLI alias the list doesn't have raises nothing."""
+    _mock_models(mock_models_api, DEPRECATED_MODEL)
+    entry = _model_entry("sonnet")
+    await _setup(hass, entry)
+
+    assert _model_issue(hass, entry, "model_deprecated") is None
+
+
+async def test_new_deprecation_found_on_a_timer(
+    hass: HomeAssistant, mock_models_api: AiohttpClientMocker
+) -> None:
+    """A model deprecated while Home Assistant runs is picked up within a day."""
+    _mock_models(mock_models_api, DEPRECATED_MODEL | {"lifecycle": "active"})
+    entry = _model_entry()
+    await _setup(hass, entry)
+    assert _model_issue(hass, entry, "model_deprecated") is None
+
+    _mock_models(mock_models_api, DEPRECATED_MODEL)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(hours=13))
+    await hass.async_block_till_done()
+
+    assert _model_issue(hass, entry, "model_deprecated") is not None
 
 
 def _assert_form_serializes(result: Any) -> None:

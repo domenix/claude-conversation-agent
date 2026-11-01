@@ -79,6 +79,7 @@ changed via **Reconfigure** or the reauth prompt.
 | AI Task structured output | Native JSON-schema output |
 | Prompt caching strategy | Managed automatically by Claude |
 | Per-tool max uses | Not available (bounded by max turns instead) |
+| Repair flow for deprecated models | A warning in Repairs; change the model by reconfiguring the agent |
 
 ## Known limitations
 

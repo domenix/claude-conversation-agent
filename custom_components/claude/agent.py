@@ -79,28 +79,31 @@ class ClaudeAgent:
         Raises ``aiohttp.ClientError`` / ``TimeoutError`` on network or HTTP
         errors and ``KeyError`` / ``TypeError`` on an unexpected response.
         """
+        session = async_get_clientsession(self._hass)
+        params = {"limit": str(MODELS_PAGE_LIMIT)}
+        models: list[Model] = []
+        while True:
+            async with session.get(
+                MODELS_URL,
+                headers=self._api_headers(),
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=MODELS_FETCH_TIMEOUT_S),
+            ) as response:
+                response.raise_for_status()
+                page = await response.json()
+            models.extend(_model_from_api(item) for item in page["data"])
+            if not page.get("has_more") or not page.get("last_id"):
+                return models
+            params["after_id"] = page["last_id"]
+
+    def _api_headers(self) -> dict[str, str]:
+        """Return the headers for Anthropic's API."""
         headers = {"anthropic-version": ANTHROPIC_VERSION}
         if self._oauth_token:
             headers["Authorization"] = f"Bearer {self._oauth_token}"
         else:
             headers["x-api-key"] = self._api_key
-        session = async_get_clientsession(self._hass)
-        timeout = aiohttp.ClientTimeout(total=MODELS_FETCH_TIMEOUT_S)
-        params = {"limit": str(MODELS_PAGE_LIMIT)}
-        models: list[Model] = []
-        while True:
-            async with session.get(
-                MODELS_URL, headers=headers, params=params, timeout=timeout
-            ) as response:
-                response.raise_for_status()
-                page = await response.json()
-            models.extend(
-                Model(item["id"], item.get("display_name") or item["id"])
-                for item in page["data"]
-            )
-            if not page.get("has_more") or not page.get("last_id"):
-                return models
-            params["after_id"] = page["last_id"]
+        return headers
 
     async def async_prepare(self) -> None:
         """Create the CLI home/workspace dirs and provision the CLI binary."""
@@ -292,6 +295,16 @@ class ClaudeAgent:
             raise
         except Exception as err:  # noqa: BLE001
             raise ClaudeAgentError(_detail(f"{type(err).__name__}: {err}")) from err
+
+
+def _model_from_api(item: dict[str, Any]) -> Model:
+    """Convert a model from Anthropic's API."""
+    return Model(
+        item["id"],
+        item.get("display_name") or item["id"],
+        lifecycle=item.get("lifecycle"),
+        retires_at=item.get("retires_at"),
+    )
 
 
 def _error(message: str) -> dict[str, Any]:

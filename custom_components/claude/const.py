@@ -19,9 +19,12 @@ CONF_OAUTH_EXPIRES_AT = "oauth_expires_at"
 
 # Raise a repair issue this far ahead of expiry.
 TOKEN_EXPIRY_WARNING = timedelta(days=14)
-TOKEN_EXPIRY_CHECK_INTERVAL = timedelta(hours=12)
 ISSUE_TOKEN_EXPIRING = "oauth_token_expiring"
 ISSUE_TOKEN_EXPIRED = "oauth_token_expired"
+ISSUE_MODEL_DEPRECATED = "model_deprecated"
+
+# How often to re-check the token's expiry and the models' lifecycle.
+PERIODIC_CHECK_INTERVAL = timedelta(hours=12)
 
 # Subentry options.
 CONF_RECOMMENDED = "recommended"
@@ -97,6 +100,9 @@ class Model:
 
     id: str
     display_name: str
+    # "active", "deprecated" or "retired"; None if the API didn't say.
+    lifecycle: str | None = None
+    retires_at: str | None = None
 
 
 # Anthropic's model list; works with both an API key and a subscription token.
@@ -104,6 +110,9 @@ MODELS_URL = "https://api.anthropic.com/v1/models"
 ANTHROPIC_VERSION = "2023-06-01"
 MODELS_PAGE_LIMIT = 1000
 MODELS_FETCH_TIMEOUT_S = 10
+MODEL_DEPRECATIONS_URL = (
+    "https://platform.claude.com/docs/en/about-claude/model-deprecations"
+)
 
 MODEL_DEFAULT = Model("default", "Account default")
 
